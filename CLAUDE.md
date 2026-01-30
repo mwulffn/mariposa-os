@@ -60,9 +60,9 @@ Color scheme:
 
 ## Debug/Testing
 
-### Panic Handler (On-Screen Debug)
+### Panic Handler (On-Screen + Serial Debug)
 
-The Panic handler provides a CPU state dump for debugging:
+The Panic handler provides a CPU state dump for debugging on both screen and serial:
 
 ```asm
 jsr Panic           ; Dump all registers and halt
@@ -71,10 +71,23 @@ jsr PanicWithMsg    ; Custom error message (A0 = msg pointer)
 
 Features:
 - Saves all registers (D0-D7, A0-A7, SR, PC) to $1000
-- Displays register values in hex on screen
-- Uses 8x8 bitmap font (included in debug.s)
+- **Displays on screen:** register values in hex with 8x8 bitmap font
+- **Outputs to serial:** formatted register dump sent to serial port
 - Red title bar with white text on dark blue background
 - Halts system after display
+
+**Serial Output Format:**
+```
+=== SYSTEM DEBUG ===
+D0:$XXXXXXXX D1:$XXXXXXXX D2:$XXXXXXXX D3:$XXXXXXXX
+D4:$XXXXXXXX D5:$XXXXXXXX D6:$XXXXXXXX D7:$XXXXXXXX
+A0:$XXXXXXXX A1:$XXXXXXXX A2:$XXXXXXXX A3:$XXXXXXXX
+A4:$XXXXXXXX A5:$XXXXXXXX A6:$XXXXXXXX A7:$XXXXXXXX
+PC:$XXXXXXXX SR:$XXXX
+[Custom message if provided]
+```
+
+This dual-output approach means panic dumps are captured via serial for logging/analysis while still being visible on screen.
 
 ### Serial Port Debugging (Real-Time Output)
 

@@ -76,7 +76,10 @@ Panic:
     bsr PanicPrintTitle
     bsr PanicPrintRegs
     bsr PanicPrintMsg
-    
+
+    ; Output to serial port
+    bsr PanicSerialOutput
+
     ; Halt
 .halt:
     bra.s   .halt
@@ -444,6 +447,205 @@ PanicPrintMsg:
     rts
 
 ; ============================================================
+; PanicSerialOutput - Send register dump to serial port
+; ============================================================
+PanicSerialOutput:
+    movem.l d0-d7/a0-a6,-(sp)
+
+    ; Send header
+    lea     .header(pc),a0
+    bsr     SerialPutString
+
+    ; Send all data registers (D0-D7)
+    lea     .lblD0(pc),a0
+    bsr     SerialPutString
+    move.l  SavedD0,d0
+    bsr     PanicSerialHex32
+
+    lea     .lblD1(pc),a0
+    bsr     SerialPutString
+    move.l  SavedD1,d0
+    bsr     PanicSerialHex32
+
+    lea     .lblD2(pc),a0
+    bsr     SerialPutString
+    move.l  SavedD2,d0
+    bsr     PanicSerialHex32
+
+    lea     .lblD3(pc),a0
+    bsr     SerialPutString
+    move.l  SavedD3,d0
+    bsr     PanicSerialHex32
+    bsr     .crlf
+
+    lea     .lblD4(pc),a0
+    bsr     SerialPutString
+    move.l  SavedD4,d0
+    bsr     PanicSerialHex32
+
+    lea     .lblD5(pc),a0
+    bsr     SerialPutString
+    move.l  SavedD5,d0
+    bsr     PanicSerialHex32
+
+    lea     .lblD6(pc),a0
+    bsr     SerialPutString
+    move.l  SavedD6,d0
+    bsr     PanicSerialHex32
+
+    lea     .lblD7(pc),a0
+    bsr     SerialPutString
+    move.l  SavedD7,d0
+    bsr     PanicSerialHex32
+    bsr     .crlf
+
+    ; Send all address registers (A0-A7)
+    lea     .lblA0(pc),a0
+    bsr     SerialPutString
+    move.l  SavedA0,d0
+    bsr     PanicSerialHex32
+
+    lea     .lblA1(pc),a0
+    bsr     SerialPutString
+    move.l  SavedA1,d0
+    bsr     PanicSerialHex32
+
+    lea     .lblA2(pc),a0
+    bsr     SerialPutString
+    move.l  SavedA2,d0
+    bsr     PanicSerialHex32
+
+    lea     .lblA3(pc),a0
+    bsr     SerialPutString
+    move.l  SavedA3,d0
+    bsr     PanicSerialHex32
+    bsr     .crlf
+
+    lea     .lblA4(pc),a0
+    bsr     SerialPutString
+    move.l  SavedA4,d0
+    bsr     PanicSerialHex32
+
+    lea     .lblA5(pc),a0
+    bsr     SerialPutString
+    move.l  SavedA5,d0
+    bsr     PanicSerialHex32
+
+    lea     .lblA6(pc),a0
+    bsr     SerialPutString
+    move.l  SavedA6,d0
+    bsr     PanicSerialHex32
+
+    lea     .lblA7(pc),a0
+    bsr     SerialPutString
+    move.l  SavedA7,d0
+    bsr     PanicSerialHex32
+    bsr     .crlf
+
+    ; Send PC and SR
+    lea     .lblPC(pc),a0
+    bsr     SerialPutString
+    move.l  SavedPC,d0
+    bsr     PanicSerialHex32
+
+    lea     .lblSR(pc),a0
+    bsr     SerialPutString
+    move.w  SavedSR,d0
+    bsr     PanicSerialHex16
+    bsr     .crlf
+
+    ; Send custom message if present
+    move.l  PanicMsgPtr,d0
+    beq.s   .done
+    bsr     .crlf
+    move.l  d0,a0
+    bsr     SerialPutString
+    bsr     .crlf
+
+.done:
+    movem.l (sp)+,d0-d7/a0-a6
+    rts
+
+.crlf:
+    move.b  #10,d0
+    bsr     SerialPutChar
+    move.b  #13,d0
+    bsr     SerialPutChar
+    rts
+
+.header:
+    dc.b    10,13,"=== SYSTEM DEBUG ===",10,13,0
+.lblD0: dc.b "D0:$",0
+.lblD1: dc.b " D1:$",0
+.lblD2: dc.b " D2:$",0
+.lblD3: dc.b " D3:$",0
+.lblD4: dc.b "D4:$",0
+.lblD5: dc.b " D5:$",0
+.lblD6: dc.b " D6:$",0
+.lblD7: dc.b " D7:$",0
+.lblA0: dc.b "A0:$",0
+.lblA1: dc.b " A1:$",0
+.lblA2: dc.b " A2:$",0
+.lblA3: dc.b " A3:$",0
+.lblA4: dc.b "A4:$",0
+.lblA5: dc.b " A5:$",0
+.lblA6: dc.b " A6:$",0
+.lblA7: dc.b " A7:$",0
+.lblPC: dc.b "PC:$",0
+.lblSR: dc.b " SR:$",0
+    even
+
+; ============================================================
+; PanicSerialHex32 - Send 32-bit hex value to serial
+; ============================================================
+; d0.l = value to send
+PanicSerialHex32:
+    movem.l d0-d3,-(sp)
+    move.l  d0,d3                   ; Save original value
+    moveq   #7,d2                   ; 8 nibbles
+.loop:
+    rol.l   #4,d3                   ; Rotate next nibble to low position
+    move.l  d3,d1
+    and.l   #$0F,d1
+    cmp.b   #10,d1
+    blt.s   .digit
+    add.b   #'A'-10,d1
+    bra.s   .send
+.digit:
+    add.b   #'0',d1
+.send:
+    move.b  d1,d0                   ; Character to send
+    bsr     SerialPutChar
+    dbf     d2,.loop
+    movem.l (sp)+,d0-d3
+    rts
+
+; ============================================================
+; PanicSerialHex16 - Send 16-bit hex value to serial
+; ============================================================
+; d0.w = value to send
+PanicSerialHex16:
+    movem.l d0-d3,-(sp)
+    move.w  d0,d3                   ; Save original value
+    moveq   #3,d2                   ; 4 nibbles
+.loop:
+    rol.w   #4,d3
+    move.w  d3,d1
+    and.w   #$0F,d1
+    cmp.b   #10,d1
+    blt.s   .digit
+    add.b   #'A'-10,d1
+    bra.s   .send
+.digit:
+    add.b   #'0',d1
+.send:
+    move.b  d1,d0
+    bsr     SerialPutChar
+    dbf     d2,.loop
+    movem.l (sp)+,d0-d3
+    rts
+
+; ============================================================
 ; PanicPrintStr - Print null-terminated string
 ; ============================================================
 ; a0 = string pointer
@@ -484,8 +686,8 @@ PanicPrintHex32:
     ; Print 8 hex digits
     moveq   #7,d2                   ; Counter
 .loop:
+    rol.l   #4,d5                   ; Rotate next nibble into low position FIRST
     move.l  d5,d3
-    rol.l   #4,d5                   ; Rotate next nibble into low position
     and.l   #$0F,d3
     cmp.b   #10,d3
     blt.s   .digit
@@ -522,8 +724,8 @@ PanicPrintHex16:
     ; Print 4 hex digits
     moveq   #3,d2                   ; Counter
 .loop:
+    rol.w   #4,d5                   ; Rotate FIRST
     move.w  d5,d3
-    rol.w   #4,d5
     and.w   #$0F,d3
     cmp.b   #10,d3
     blt.s   .digit
