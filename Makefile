@@ -29,9 +29,5 @@ run: $(ROM)
 run-direct: $(ROM)
 	/Applications/FS-UAE.app/Contents/MacOS/fs-uae "$(PWD)/a500.fs-uae"
 
-# Run with vAmiga instead (if installed)
-run-vamiga: $(ROM)
-	open -a vAmiga $(ROM)
-
 clean:
 	rm -rf $(BUILDDIR)

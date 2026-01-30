@@ -92,68 +92,100 @@ PanicWithMsg:
     bra.s   Panic
 
 ; ============================================================
+; PanicInitCopper - Build minimal copper list for Panic
+; ============================================================
+PanicInitCopper:
+    lea     COPPERLIST,a0
+
+    ; Set BPL1PTH register (high word of screen address)
+    move.w  #BPL1PTH,(a0)+
+    move.w  #(SCREEN>>16)&$FFFF,(a0)+
+
+    ; Set BPL1PTL register (low word of screen address)
+    move.w  #BPL1PTL,(a0)+
+    move.w  #SCREEN&$FFFF,(a0)+
+
+    ; End copper list
+    move.l  #$FFFFFFFE,(a0)+
+
+    rts
+
+; ============================================================
 ; PanicInitDisplay - Set up minimal known display state
+; ============================================================
+; Matches bootstrap.s sequence with copper list added
 ; ============================================================
 PanicInitDisplay:
     lea     CUSTOM,a6
-    
-    ; Disable DMA and interrupts
+
+    ; Disable all DMA and interrupts
     move.w  #$7FFF,DMACON(a6)
     move.w  #$7FFF,INTENA(a6)
-    
-    ; Set debug colors
-    move.w  #DEBUG_BG_COLOR,COLOR00(a6)
-    move.w  #DEBUG_FG_COLOR,COLOR01(a6)
-    
-    ; Clear screen
+    move.w  #$7FFF,INTREQ(a6)
+
+    ; Clear screen memory FIRST
     lea     SCREEN,a0
     move.w  #((256*BYTES_PER_ROW)/4)-1,d0
 .clr:
     clr.l   (a0)+
     dbf     d0,.clr
-    
+
     ; Set up display registers
-    move.w  #$1200,BPLCON0(a6)      ; 1 bitplane
+    move.w  #$1200,BPLCON0(a6)      ; 1 bitplane, color on
     move.w  #$0000,BPLCON1(a6)
     move.w  #$0000,BPLCON2(a6)
-    
+    move.w  #$0000,BPL1MOD(a6)
+    move.w  #$0000,BPL2MOD(a6)
+
+    ; PAL display window
     move.w  #$2C81,DIWSTRT(a6)
     move.w  #$2CC1,DIWSTOP(a6)
     move.w  #$0038,DDFSTRT(a6)
     move.w  #$00D0,DDFSTOP(a6)
-    
-    ; Set bitplane pointer
+
+    ; Set bitplane pointer (initial)
     move.l  #SCREEN,d0
     move.w  d0,BPL1PTL(a6)
     swap    d0
     move.w  d0,BPL1PTH(a6)
-    
-    ; Enable bitplane DMA
-    move.w  #$8100,DMACON(a6)       ; SET + BPLEN
-    move.w  #$8200,DMACON(a6)       ; SET + DMAEN
-    
+
+    ; Build copper list
+    bsr     PanicInitCopper
+
+    ; Set colors
+    move.w  #DEBUG_BG_COLOR,COLOR00(a6)
+    move.w  #DEBUG_FG_COLOR,COLOR01(a6)
+
+    ; Start copper
+    move.l  #COPPERLIST,d0
+    move.w  d0,COP1LCL(a6)
+    swap    d0
+    move.w  d0,COP1LCH(a6)
+    move.w  COPJMP1(a6),d0          ; Trigger copper start
+
+    ; Enable DMA with copper
+    move.w  #$8380,DMACON(a6)       ; SET + BPLEN + COPEN + DMAEN
+
     rts
 
 ; ============================================================
 ; PanicPrintTitle - Print header
 ; ============================================================
 PanicPrintTitle:
-    lea     CUSTOM,a6
-    move.w  #DEBUG_ERR_COLOR,COLOR01(a6)    ; Red title
-    
+    ; Don't change colors - single bitplane means only one foreground color
+    ; Changing COLOR01 while display is active causes flickering
+
     lea     .title(pc),a0
     moveq   #2,d0                   ; X
     moveq   #DEBUG_TITLE_Y,d1       ; Y
     bsr PanicPrintStr
-    
-    move.w  #DEBUG_FG_COLOR,COLOR01(a6)     ; Back to white
-    
+
     ; Separator line
     lea     .separator(pc),a0
     moveq   #2,d0
     moveq   #DEBUG_TITLE_Y+1,d1
     bsr PanicPrintStr
-    
+
     rts
 
 .title:

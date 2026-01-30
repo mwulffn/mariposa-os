@@ -23,22 +23,22 @@ RomStart:
 Start:
     ; Disable interrupts at CPU level
     move.w  #$2700,sr
-    
+
     ; Set up stack
     lea     STACK,sp
-    
+
     ; Point to custom chips
     lea     CUSTOM,a6
-    
+
     ; Disable all DMA and interrupts
     move.w  #$7FFF,DMACON(a6)
     move.w  #$7FFF,INTENA(a6)
     move.w  #$7FFF,INTREQ(a6)
-    
+
     ; Disable ROM overlay so chip RAM is visible at $0
     move.b  #$03,CIAA_DDRA
     move.b  #$00,CIAA_PRA
-    
+
     ; Clear screen memory
     lea     SCREEN,a0
     move.w  #((SCREEN_HEIGHT*BYTES_PER_ROW)/4)-1,d0
@@ -50,7 +50,9 @@ Start:
     move.w  #$1200,BPLCON0(a6)      ; 1 bitplane, color on
     move.w  #$0000,BPLCON1(a6)
     move.w  #$0000,BPLCON2(a6)
-    
+    move.w  #$0000,BPL1MOD(a6)      ; Bitplane modulo = 0
+    move.w  #$0000,BPL2MOD(a6)
+
     ; PAL display window
     move.w  #$2C81,DIWSTRT(a6)
     move.w  #$2CC1,DIWSTOP(a6)

@@ -23,6 +23,8 @@ VHPOSR          equ $006
 BPLCON0         equ $100
 BPLCON1         equ $102
 BPLCON2         equ $104
+BPL1MOD         equ $108
+BPL2MOD         equ $10A
 
 ; Bitplane pointers
 BPL1PTH         equ $0E0
@@ -75,7 +77,7 @@ BLTADAT         equ $074
 ; ============================================================
 ; CIA-A registers (directly accessible)
 ; ============================================================
-CIAA_PRA        equ $BFE001         ; Port A (active low accent accent accent accent accent accent accent)
+CIAA_PRA        equ $BFE001         ; Port A (active low)
 CIAA_PRB        equ $BFE101         ; Port B
 CIAA_DDRA       equ $BFE201         ; Data direction A
 CIAA_DDRB       equ $BFE301         ; Data direction B
