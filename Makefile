@@ -1,13 +1,14 @@
 # Amiga bare-metal development Makefile
 
 ASM = vasmm68k_mot
-AFLAGS = -Fbin -m68000 -no-opt
+AFLAGS = -Fbin -m68000 -no-opt -I$(SRCDIR)
 
 SRCDIR = src
 BUILDDIR = build
 
 ROM = $(BUILDDIR)/kick.rom
-SRC = $(SRCDIR)/bootstrap.s
+SRCS = $(wildcard $(SRCDIR)/*.s)
+INCS = $(wildcard $(SRCDIR)/*.i)
 
 .PHONY: all run clean
 
@@ -16,8 +17,9 @@ all: $(ROM)
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
 
-$(ROM): $(SRC) | $(BUILDDIR)
-	$(ASM) $(AFLAGS) -o $@ $<
+# Main ROM build - bootstrap.s includes other modules
+$(ROM): $(SRCS) $(INCS) | $(BUILDDIR)
+	$(ASM) $(AFLAGS) -o $@ $(SRCDIR)/bootstrap.s
 	@echo "ROM size: $$(wc -c < $@) bytes"
 
 run: $(ROM)
