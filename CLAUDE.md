@@ -18,13 +18,16 @@ Assembler flags: `-Fbin -m68000 -no-opt -I$(SRCDIR)`
 
 ```
 src/
-  bootstrap.s   - ROM entry point, basic display setup (includes debug.s)
+  bootstrap.s   - ROM entry point, basic display setup (includes debug.s, serial.s)
   debug.s       - Panic handler with register dump + 8x8 bitmap font (chars 32-126)
-  hardware.i    - Hardware register definitions (custom chip registers, CIA, etc.)
+  serial.s      - Serial port I/O for real-time debugging output
+  hardware.i    - Hardware register definitions (custom chip registers, CIA, serial, etc.)
 build/
   rom.bin       - Compiled ROM image (256KB)
 Makefile        - Build system
-a500.fs-uae     - FS-UAE emulator config
+a500.fs-uae     - FS-UAE emulator config (serial port on TCP 5555)
+serial_reader.py - Python tool to capture serial output
+test_serial.sh   - Automated serial debugging test
 ```
 
 ## Architecture
@@ -57,6 +60,8 @@ Color scheme:
 
 ## Debug/Testing
 
+### Panic Handler (On-Screen Debug)
+
 The Panic handler provides a CPU state dump for debugging:
 
 ```asm
@@ -70,6 +75,53 @@ Features:
 - Uses 8x8 bitmap font (included in debug.s)
 - Red title bar with white text on dark blue background
 - Halts system after display
+
+### Serial Port Debugging (Real-Time Output)
+
+Serial port provides real-time debugging output via FS-UAE's TCP serial emulation (9600 baud).
+
+**In Code:**
+```asm
+    bsr     SerialInit          ; Call once during boot (already done in bootstrap.s)
+
+    ; Send a single character
+    move.b  #'A',d0
+    bsr     SerialPutChar
+
+    ; Send a string
+    lea     MyDebugMsg(pc),a0
+    bsr     SerialPutString
+
+MyDebugMsg:
+    dc.b    "Debug message here",10,13,0   ; 10,13 = LF,CR for line endings
+    even
+```
+
+**Manual Testing:**
+```bash
+# Terminal 1 - Start serial monitor first
+nc localhost 5555
+
+# Terminal 2 - Run emulator
+make run
+```
+
+**Automated Testing (for Claude):**
+```bash
+./test_serial.sh    # Runs FS-UAE, captures serial output, displays results
+```
+
+**How Claude Can Debug:**
+1. Add `SerialPutString` calls in the code to output debug messages
+2. Build with `make`
+3. Run `./test_serial.sh` to capture and view serial output
+4. Serial output shows real-time execution flow without stopping the system
+
+**Technical Details:**
+- Serial registers: SERDATR ($DFF018), SERDAT ($DFF030), SERPER ($DFF032)
+- Polling-based output (no interrupts)
+- FS-UAE config: `serial_port = tcp://127.0.0.1:5555/wait`
+- Python reader (`serial_reader.py`) provides reliable capture for automated testing
 
 ## Next Steps
 
