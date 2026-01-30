@@ -1,0 +1,44 @@
+# FS-UAE Configuration: Amiga 500 development target
+# 512KB Chip RAM + 1MB Fast RAM, custom Kickstart
+
+# Base hardware
+amiga_model = A500
+accuracy = 1
+
+# CPU - stock 68000, no acceleration  
+cpu = 68000
+cpu_speed = real
+
+# Memory configuration
+chip_memory = 512
+slow_memory = 0
+fast_memory = 1024
+
+# Use our custom Kickstart ROM
+kickstart_file = build/kick.rom
+
+# No workbench, we're going bare metal
+# (comment these in if you want to test against real Kickstart later)
+# kickstart_file = path/to/kick13.rom
+# floppy_drive_0 = path/to/workbench.adf
+
+# Graphics
+fullscreen = 0
+window_width = 720
+window_height = 568
+
+# PAL timing (matches our display setup)
+ntsc_mode = 0
+
+# Logging - useful for debugging
+log_bsdsocket = 0
+
+# Input
+joystick_port_1 = mouse
+joystick_port_0 = none
+
+# Warp mode toggle with F12+W for faster testing
+warp_mode_key = 0x57
+
+console_debugger = 1
+log_debug = 1
