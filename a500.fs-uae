@@ -42,3 +42,8 @@ warp_mode_key = 0x57
 
 console_debugger = 1
 log_debug = 1
+
+# Serial Port - Debug output via TCP
+# Connect with: nc localhost 5555
+# Use /wait to capture boot-time output
+serial_port = tcp://127.0.0.1:5555/wait

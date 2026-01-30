@@ -71,7 +71,14 @@ Start:
     ; Set colors
     move.w  #$0006,COLOR00(a6)      ; Dark blue background
     move.w  #$0FFF,COLOR01(a6)      ; White text
-    
+
+    ; Initialize serial port for debugging
+    bsr     SerialInit
+
+    ; Send serial test message
+    lea     SerialMsg(pc),a0
+    bsr     SerialPutString
+
     ; Start copper
     move.l  #COPPERLIST,d0
     move.w  d0,COP1LCL(a6)
@@ -171,10 +178,15 @@ BootMsg:
     dc.b    "READY.",0
     even
 
+SerialMsg:
+    dc.b    "Serial port initialized at 9600 baud",10,13,0
+    even
+
 ; ============================================================
 ; Include debug module
 ; ============================================================
     include "debug.s"
+    include "serial.s"
 
 ; ============================================================
 ; ROM footer - pad to 256KB and add checksum location

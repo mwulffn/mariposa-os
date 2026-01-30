@@ -109,6 +109,17 @@ CIAB_CRA        equ $BFDE00
 CIAB_CRB        equ $BFDF00
 
 ; ============================================================
+; Serial port registers (Custom chip)
+; ============================================================
+SERDATR         equ $018            ; Serial data/status (read)
+SERDAT          equ $030            ; Serial data (write)
+SERPER          equ $032            ; Serial period (baud rate)
+
+; SERDATR status bits
+SERDATR_TBE     equ 13              ; Transmit buffer empty
+SERDATR_RBF     equ 11              ; Receive buffer full
+
+; ============================================================
 ; Memory layout
 ; ============================================================
 CHIP_RAM_START  equ $000000
