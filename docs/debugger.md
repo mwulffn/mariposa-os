@@ -159,10 +159,8 @@ make           # Build ROM first
 
 Automated test suite:
 ```bash
-./test_comprehensive.py    # 12 tests covering all commands
-./test_debugger_verify.py  # Verify register modification
-./test_debugger.py         # Basic command test
-./test_serial.sh           # Serial output test
+./test_comprehensive.py    # Full debugger test (12 tests)
+./test_serial.sh           # Basic serial output test
 ```
 
 All tests should pass with no errors.
