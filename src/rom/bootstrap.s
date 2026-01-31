@@ -299,37 +299,6 @@ InitCopper:
     rts
 
 ; ============================================================
-; SerialPutHex - Print 32-bit hex value
-; d0.l = value to print
-; ============================================================
-SerialPutHex:
-    movem.l d0-d2/a0,-(sp)
-    lea     HEX_BUFFER,a0
-    move.b  #'$',(a0)+
-
-    moveq   #7,d2               ; 8 hex digits
-.loop:
-    rol.l   #4,d0
-    move.l  d0,d1
-    and.w   #$0F,d1
-    cmp.b   #10,d1
-    blt.s   .digit
-    add.b   #'A'-10,d1
-    bra.s   .store
-.digit:
-    add.b   #'0',d1
-.store:
-    move.b  d1,(a0)+
-    dbf     d2,.loop
-
-    clr.b   (a0)                ; Null terminate
-    lea     HEX_BUFFER,a0
-    bsr     SerialPutString
-
-    movem.l (sp)+,d0-d2/a0
-    rts
-
-; ============================================================
 ; PrintMemoryMap - Output memory map table to serial port
 ; ============================================================
 ; Reads the memory map table and formats each entry for display
@@ -440,56 +409,6 @@ PrintMemoryMap:
 
 .done:
     movem.l (sp)+,d0-d4/a0-a1
-    rts
-
-; ============================================================
-; SerialPutDecimal - Print decimal number
-; Input: d0.l = number to print
-; ============================================================
-SerialPutDecimal:
-    movem.l d0-d2/a0-a2,-(sp)
-
-    lea     DEC_BUFFER,a0
-    move.l  a0,a1           ; Save start position
-
-    ; Handle zero special case
-    tst.l   d0
-    bne.s   .convert
-    move.b  #'0',(a0)+
-    bra.s   .terminate
-
-.convert:
-    ; Convert to decimal (store digits in reverse)
-    move.l  a0,a1           ; Mark start
-.digit_loop:
-    move.l  d0,d1
-    divu    #10,d1          ; d1 = d0 / 10
-    swap    d1              ; Remainder in low word
-    add.b   #'0',d1         ; Convert to ASCII
-    move.b  d1,(a0)+        ; Store digit
-    clr.w   d1
-    swap    d1
-    move.l  d1,d0           ; Quotient becomes new dividend
-    tst.l   d0
-    bne.s   .digit_loop
-
-    ; Reverse the string
-    move.l  a0,a2           ; End position
-    subq.l  #1,a2
-.reverse_loop:
-    cmp.l   a1,a2
-    ble.s   .terminate
-    move.b  (a1),d1
-    move.b  (a2),(a1)+
-    move.b  d1,(a2)-
-    bra.s   .reverse_loop
-
-.terminate:
-    clr.b   (a0)            ; Null terminate
-    move.l  a1,a0
-    bsr     SerialPutString
-
-    movem.l (sp)+,d0-d2/a0-a2
     rts
 
 ; ============================================================
