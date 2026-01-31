@@ -21,7 +21,7 @@
 ; 7. Repeat for next card
 ; ============================================================
 ConfigureZorroII:
-    movem.l d1-d5/a0-a1,-(sp)
+    movem.l d1-d6/a0-a2,-(sp)
 
     ; MAGENTA - Entering autoconfig
     lea     CUSTOM,a1
@@ -34,6 +34,7 @@ ConfigureZorroII:
     move.l  #$200000,d3         ; Next allocation address
     moveq   #0,d0               ; First memory card base
     moveq   #8,d4               ; Safety counter - max 8 cards
+    moveq   #0,d6               ; Previous er_Type (detect repeated reads)
 
 .next_card:
     ; Check safety counter
@@ -46,17 +47,17 @@ ConfigureZorroII:
     ; CYAN - Reading card
     move.w  #$0FF,COLOR00(a1)
 
-    lea     ZORRO_BASE,a0
+    lea     ZORRO_BASE,a2       ; a2 = ZORRO_BASE (preserve through calls!)
 
     ; Read er_Type (register 00) using proper nibble protocol
     ; Zorro II: nibbles in D15-D12 of words at $E80000 and $E80002
-    move.w  (a0),d1             ; Read $E80000
+    move.w  (a2),d1             ; Read $E80000
     and.l   #$0000f000,d1
     rol.w   #4,d1               ; Rotate D15-D12 to D3-D0
     and.w   #$0F,d1             ; Mask high nibble (bits 7-4)
     lsl.b   #4,d1               ; Shift to bits 7-4
 
-    move.w  2(a0),d2            ; Read $E80002
+    move.w  2(a2),d2            ; Read $E80002
     and.l   #$0000f000,d2
     rol.w   #4,d2               ; Rotate D15-D12 to D3-D0
     and.w   #$0F,d2             ; Mask low nibble (bits 3-0)
@@ -66,8 +67,9 @@ ConfigureZorroII:
     move.l  d1,-(sp)
     lea     ReadingCardMsg(pc),a0
     bsr     SerialPutString
-    moveq   #0,d0
-    move.b  3(sp),d0
+    moveq   #0,d5               ; Use d5 for printing (preserve d0!)
+    move.b  3(sp),d5
+    move.l  d5,d0
     bsr     SerialPutHex
     lea     NewlineMsg(pc),a0
     bsr     SerialPutString
@@ -76,6 +78,11 @@ ConfigureZorroII:
     ; Check for no card (register 00 is NOT inverted, $FF = no card)
     cmp.b   #$FF,d1
     beq   .no_card
+
+    ; Check for repeated/stuck value (same card appearing twice = stale data)
+    cmp.b   d6,d1               ; Compare to previous er_Type
+    beq   .no_card              ; Same value = stuck, treat as no card
+    move.b  d1,d6               ; Save current for next iteration
 
     ; Check card type (bits 7-6): 11 = Zorro II
     move.b  d1,d2
@@ -86,22 +93,48 @@ ConfigureZorroII:
     ; Save er_Type for size extraction later
     move.b  d1,-(sp)            ; Push er_Type on stack
 
-    lea     ZORRO_BASE,a0
-
     ; Read er_Flags (register 08) using nibble protocol
-    move.w  $08(a0),d1          ; Read $E80008 (high nibble)
+    move.w  $08(a2),d1          ; Read $E80008 (high nibble)
     rol.w   #4,d1
     and.w   #$0F,d1
     lsl.b   #4,d1
 
-    move.w  $0A(a0),d2          ; Read $E8000A (low nibble)
+    move.w  $0A(a2),d2          ; Read $E8000A (low nibble)
     rol.w   #4,d2
     and.w   #$0F,d2
     or.b    d2,d1               ; d1 = full er_Flags byte
 
+    ; Debug: print er_Flags BEFORE inversion
+    move.l  d0,-(sp)            ; SAVE d0!
+    move.l  d1,-(sp)
+    lea     FlagsRawMsg(pc),a0
+    bsr     SerialPutString
+    moveq   #0,d5
+    move.b  7(sp),d5            ; Get from stack (adjusted offset)
+    move.l  d5,d0
+    bsr     SerialPutHex
+    lea     NewlineMsg(pc),a0
+    bsr     SerialPutString
+    move.l  (sp)+,d1
+    move.l  (sp)+,d0            ; RESTORE d0!
+
     ; Registers except 00 are inverted
     eor.b   #$FF,d1             ; Invert to get logical value
     move.b  d1,d2               ; d2 = er_Flags
+
+    ; Debug: print er_Flags AFTER inversion (save/restore d0!)
+    move.l  d0,-(sp)
+    move.l  d2,-(sp)
+    lea     FlagsInvMsg(pc),a0
+    bsr     SerialPutString
+    moveq   #0,d5
+    move.b  7(sp),d5
+    move.l  d5,d0
+    bsr     SerialPutHex
+    lea     NewlineMsg(pc),a0
+    bsr     SerialPutString
+    move.l  (sp)+,d2
+    move.l  (sp)+,d0
 
     ; Check if memory board (bit 7)
     btst    #7,d2
@@ -137,13 +170,30 @@ ConfigureZorroII:
     lea     WritingBaseMsg(pc),a0
     bsr     SerialPutString
 
-    ; 0000 0000 0010 0000 0000 0000 0000 0000 (200000)
-    lea     ZORRO_BASE,a0
-    
-    move.b #$00,$46(a0)
-    move.b #$00,$44(a0)
-    move.b #$00,$4A(a0)
-    move.b #%0010,$48(a0)
+    ; Write nibbles to config registers (a2 still points to ZORRO_BASE)
+    ; Each nibble goes in upper 4 bits of a BYTE write
+    ; Extract and write A31-A24
+    move.l  d3,d2
+    lsr.l   #8,d2
+    lsr.l   #8,d2
+    lsr.l   #8,d2               ; d2 = A31-A24
+    move.b  d2,d5
+    and.b   #$F0,d5             ; High nibble (A31-A28)
+    move.b  d5,$44(a2)
+    move.b  d2,d5
+    lsl.b   #4,d5               ; Low nibble (A27-A24) shifted to upper 4 bits
+    move.b  d5,$46(a2)
+
+    ; Extract and write A23-A16
+    move.l  d3,d2
+    lsr.l   #8,d2
+    lsr.l   #8,d2               ; d2 = A23-A16
+    move.b  d2,d5
+    lsl.b   #4,d5               ; Low nibble (A19-A16) shifted to upper 4 bits
+    move.b  d5,$4A(a2)
+    move.b  d2,d5
+    and.b   #$F0,d5             ; High nibble (A23-A20)
+    move.b  d5,$48(a2)          ; TRIGGERS!
     ; Write A31-A24 (byte $00) as nibbles
     ; move.l  d1,d2
     ;lsr.l   #8,d2
@@ -236,7 +286,7 @@ ConfigureZorroII:
     lea     IOCardMsg(pc),a0
     bsr     SerialPutString
     ; I/O card - just shut it up for now
-    move.b  #$FF,$4C(a0)        ; Write to shutup register
+    move.b  #$FF,$4C(a2)        ; Write to shutup register (a2=ZORRO_BASE)
     bra   .next_card
 
 .no_card:
@@ -256,7 +306,7 @@ ConfigureZorroII:
     bsr     SerialPutString
     move.l  (sp)+,d0
 
-    movem.l (sp)+,d1-d5/a0-a1
+    movem.l (sp)+,d1-d6/a0-a2
     rts
 
 ; ============================================================
@@ -268,6 +318,14 @@ AutoconfigStartMsg:
 
 ReadingCardMsg:
     dc.b    "  Reading $E80000: $",0
+    even
+
+FlagsRawMsg:
+    dc.b    "    er_Flags (raw): $",0
+    even
+
+FlagsInvMsg:
+    dc.b    "    er_Flags (inverted): $",0
     even
 
 NoCardMsg:
