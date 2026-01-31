@@ -5,7 +5,8 @@
 
 # Base hardware
 # Using A500 (not A500+) because FS-UAE allocates slow_memory correctly on A500
-amiga_model = A500
+[fs-uae]
+amiga_model = A500+
 accuracy = 1
 
 # CPU - stock 68000, no acceleration  
@@ -13,9 +14,9 @@ cpu = 68000
 cpu_speed = real
 
 # Memory configuration
-chip_memory = 512
-slow_memory = 1792
-fast_memory = 0
+chip_memory = 1024
+# slow_memory = 0
+fast_memory = 8192
 
 # Explanation:
 # - chip_memory: 512KB (OCS max), located at $000000
