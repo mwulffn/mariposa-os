@@ -67,19 +67,29 @@ class AmigaDebugger:
                     text = data.decode('ascii', errors='replace')
                     # Print without newline if it doesn't end with one
                     print(text, end='', flush=True)
+                else:
+                    # Empty data means connection closed (FS-UAE quit)
+                    if self.running:
+                        print("\n\n[ERROR] Serial connection closed (FS-UAE may have quit)")
+                        self.running = False
+                    break
             except socket.timeout:
                 continue
             except Exception as e:
                 if self.running:
                     print(f"\n[Serial read error: {e}]")
+                    self.running = False
                 break
 
     def send_command(self, cmd):
         """Send a command to the debugger"""
         try:
             self.sock.sendall(cmd.encode() + b'\n')
+        except (BrokenPipeError, ConnectionResetError):
+            print("\n\n[ERROR] Serial connection lost (FS-UAE may have quit)")
+            self.running = False
         except Exception as e:
-            print(f"\n[Send error: {e}]")
+            print(f"\n[ERROR] Failed to send command: {e}")
             self.running = False
 
     def interactive_session(self):
@@ -101,6 +111,11 @@ class AmigaDebugger:
         try:
             while self.running:
                 try:
+                    # Check if reader thread died (connection lost)
+                    if not self.reader_thread.is_alive():
+                        print("\n[ERROR] Connection lost, exiting...")
+                        break
+
                     # Read command from user
                     if sys.stdin.isatty():
                         cmd = input()
