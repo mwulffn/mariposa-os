@@ -45,3 +45,38 @@ SerialPutString:
 .done:
     movem.l (sp)+,d0/a0/a6
     rts
+
+; ============================================================
+; SerialGetChar - Non-blocking read
+; ============================================================
+; Returns character in D0.b if available, 0 with Z flag if not
+; Modifies: D0, A6
+SerialGetChar:
+    movem.l a6,-(sp)
+    lea     CUSTOM,a6
+    btst    #SERDATR_RBF,SERDATR(a6)    ; Check receive buffer full
+    beq.s   .no_data
+    move.w  SERDATR(a6),d0              ; Read character + status
+    and.w   #$00FF,d0                   ; Mask to byte, clears Z
+    movem.l (sp)+,a6
+    rts
+.no_data:
+    moveq   #0,d0                       ; Return 0 with Z flag set
+    movem.l (sp)+,a6
+    rts
+
+; ============================================================
+; SerialWaitChar - Blocking read
+; ============================================================
+; Returns character in D0.b when available
+; Modifies: D0, A6
+SerialWaitChar:
+    movem.l a6,-(sp)
+    lea     CUSTOM,a6
+.wait:
+    btst    #SERDATR_RBF,SERDATR(a6)
+    beq.s   .wait
+    move.w  SERDATR(a6),d0
+    and.w   #$00FF,d0                   ; Mask to byte
+    movem.l (sp)+,a6
+    rts

@@ -120,9 +120,8 @@ Start:
     lea     SuccessMsg(pc),a0
     bsr     SerialPutString
 
-    ; Infinite loop
-.halt:
-    bra.s   .halt
+    ; Enter interactive debugger
+    jmp     DebuggerEntry
 
 ; ============================================================
 ; InstallExceptionVectors - Install all exception handlers
@@ -619,11 +618,12 @@ GenericExcMsg:
     even
 
 ; ============================================================
-; Include debug, memory, and serial modules
+; Include debug, memory, serial, and debugger modules
 ; ============================================================
     include "debug.s"
     include "memory.s"
     include "serial.s"
+    include "debugger.s"
 
 ; ============================================================
 ; ROM footer - pad to 256KB and add checksum location

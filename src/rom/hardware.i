@@ -117,7 +117,7 @@ SERPER          equ $032            ; Serial period (baud rate)
 
 ; SERDATR status bits
 SERDATR_TBE     equ 13              ; Transmit buffer empty
-SERDATR_RBF     equ 11              ; Receive buffer full
+SERDATR_RBF     equ 14              ; Receive buffer full
 
 ; ============================================================
 ; Memory layout
@@ -152,6 +152,8 @@ FAST_RAM_VAR    equ $000468         ; FastRAMSize variable (4 bytes)
 FAST_RAM_BASE   equ $00046C         ; FastRAMBase address (4 bytes)
 DBG_STACK       equ $00084F         ; Debugger stack top
 DBG_CMD_BUF     equ $000850         ; Command buffer (128 bytes)
+DBG_BUF_IDX     equ $0008D0         ; Command buffer index
+DBG_LAST_ADDR   equ $0008D4         ; Last examined address
 COPPERLIST      equ $000950         ; Copper list (256 bytes)
 SCREEN          equ $000A50         ; Display bitplane (10KB)
 MEMMAP_TABLE    equ $003250         ; Memory map (432 bytes)

@@ -80,9 +80,8 @@ Panic:
     ; Output to serial port
     bsr PanicSerialOutput
 
-    ; Halt
-.halt:
-    bra.s   .halt
+    ; Enter interactive debugger instead of halting
+    jmp     DebuggerMain
 
 ; ============================================================
 ; PanicWithMsg - Entry point preserving a message

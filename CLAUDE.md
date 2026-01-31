@@ -17,53 +17,45 @@ Assembler flags: `-Fbin -m68000 -no-opt -I$(SRCDIR)`
 ## Project Structure
 
 ```
-src/
-  rom/
-    bootstrap.s   - ROM entry point, basic display setup (includes debug.s, serial.s)
-    debug.s       - Panic handler with register dump + 8x8 bitmap font (chars 32-126)
-    serial.s      - Serial port I/O for real-time debugging output
-    hardware.i    - Hardware register definitions (custom chip registers, CIA, serial, etc.)
-  kernel/
+src/rom/
+  bootstrap.s   - ROM entry point, memory detection, enters debugger
+  debug.s       - Panic handler with register dump
+  serial.s      - Serial port I/O (input and output)
+  debugger.s    - Interactive debugger (~630 lines)
+  hardware.i    - Hardware definitions
+  memory.s      - Memory detection and management
+docs/
+  rom_design.md - ROM architecture
+  debugger.md   - Debugger guide
 build/
-  rom.bin       - Compiled ROM image (256KB)
-Makefile        - Build system
-a500.fs-uae     - FS-UAE emulator config (serial port on TCP 5555)
-serial_reader.py - Python tool to capture serial output
-test_serial.sh   - Automated serial debugging test
+  kick.rom      - Compiled ROM (256KB)
+debug.py        - Interactive debugger launcher
+test_*.py       - Test scripts
 ```
 
-## Architecture
+## Documentation
 
-For documentation see:
+- `docs/rom_design.md` - ROM architecture and design
+- `docs/debugger.md` - Interactive debugger guide
 
-  - *ROM* reference 'docs/rom_design.md'
 
+## Interactive Debugger
 
-**Manual Testing:**
+The ROM boots directly into an interactive debugger accessible via serial port.
+
+**Quick Start:**
 ```bash
-# Terminal 1 - Start serial monitor first
-nc localhost 5555
-
-# Terminal 2 - Run emulator
-make run
+./debug.py          # Launches FS-UAE and connects automatically
 ```
 
-**Automated Testing (for Claude):**
+**Commands:** `r` (registers), `m` (memory), `g` (go), `?` (help)
+
+**Full documentation:** See `docs/debugger.md`
+
+**Testing:**
 ```bash
-./test_serial.sh    # Runs FS-UAE, captures serial output, displays results
+./test_comprehensive.py    # Full test suite (12 tests)
 ```
-
-**How Claude Can Debug:**
-1. Add `SerialPutString` calls in the code to output debug messages
-2. Build with `make`
-3. Run `./test_serial.sh` to capture and view serial output
-4. Serial output shows real-time execution flow without stopping the system
-
-**Technical Details:**
-- Serial registers: SERDATR ($DFF018), SERDAT ($DFF030), SERPER ($DFF032)
-- Polling-based output (no interrupts)
-- FS-UAE config: `serial_port = tcp://127.0.0.1:5555/wait`
-- Python reader (`serial_reader.py`) provides reliable capture for automated testing
 
 ## Next Steps
 
