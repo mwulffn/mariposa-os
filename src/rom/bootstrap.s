@@ -555,12 +555,13 @@ GenericExcMsg:
     even
 
 ; ============================================================
-; Include debug, autoconfig, memory, serial, and debugger modules
+; Include debug, autoconfig, memory, serial, sprintf, and debugger modules
 ; ============================================================
     include "debug.s"
     include "autoconfig.s"
     include "memory.s"
     include "serial.s"
+    include "sprintf.s"
     include "debugger.s"
 
 ; ============================================================

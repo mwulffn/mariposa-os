@@ -76,7 +76,8 @@ $008D0 - $0094F   Reserved (128 bytes)
 $00950 - $00A4F   Copper list for debugger (256 bytes)
 $00A50 - $0324F   Debug display bitplane (10KB, 320x256x1)
 $03250 - $033FF   Memory map table (432 bytes, up to 36 entries)
-$03400 - $03FFF   Reserved for expansion (~3KB)
+$03400 - $034FF   Sprintf output buffer (256 bytes)
+$03500 - $03FFF   Reserved for expansion (~2.75KB)
 $04000 - $FFFFF   Kernel-managed chip RAM (~1008KB)
 ```
 

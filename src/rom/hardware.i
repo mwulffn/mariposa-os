@@ -152,8 +152,6 @@ ROM_END         equ $FFFFFF
 ; Our memory map (follows docs/rom_design.md)
 ; ============================================================
 REG_DUMP_AREA   equ $000400         ; Register dump (80 bytes)
-HEX_BUFFER      equ $000450         ; Hex output buffer (12 bytes)
-DEC_BUFFER      equ $00045C         ; Decimal output buffer (12 bytes)
 CHIP_RAM_VAR    equ $000460         ; ChipRAMSize variable (4 bytes)
 SLOW_RAM_VAR    equ $000464         ; SlowRAMSize variable (4 bytes)
 FAST_RAM_VAR    equ $000468         ; FastRAMSize variable (4 bytes)
@@ -165,6 +163,7 @@ DBG_LAST_ADDR   equ $0008D4         ; Last examined address
 COPPERLIST      equ $000950         ; Copper list (256 bytes)
 SCREEN          equ $000A50         ; Display bitplane (10KB)
 MEMMAP_TABLE    equ $003250         ; Memory map (432 bytes)
+SPRINTF_BUFFER  equ $003400         ; Sprintf output buffer (256 bytes)
 KERNEL_CHIP     equ $004000         ; Kernel-managed chip RAM start
 
 ; ============================================================

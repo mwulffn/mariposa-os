@@ -142,7 +142,7 @@ SerialPutHex16:
 ; Modifies: D0-D2, A0, A6
 SerialPutHex32:
     movem.l d0-d2/a0,-(sp)
-    lea     HEX_BUFFER,a0
+    lea     SPRINTF_BUFFER,a0
 
     moveq   #7,d2               ; 8 hex digits
 .loop:
@@ -160,7 +160,7 @@ SerialPutHex32:
     dbf     d2,.loop
 
     clr.b   (a0)                ; Null terminate
-    lea     HEX_BUFFER,a0
+    lea     SPRINTF_BUFFER,a0
     bsr     SerialPutString
 
     movem.l (sp)+,d0-d2/a0
@@ -174,7 +174,7 @@ SerialPutHex32:
 SerialPutDecimal:
     movem.l d0-d2/a0-a2,-(sp)
 
-    lea     DEC_BUFFER,a0
+    lea     SPRINTF_BUFFER,a0
     move.l  a0,a1           ; Save start position
 
     ; Handle zero special case
@@ -206,7 +206,8 @@ SerialPutDecimal:
     ble.s   .terminate
     move.b  (a1),d1
     move.b  (a2),(a1)+
-    move.b  d1,(a2)-
+    subq.l  #1,a2
+    move.b  d1,(a2)
     bra.s   .reverse_loop
 
 .terminate:
