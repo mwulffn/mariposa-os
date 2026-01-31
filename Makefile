@@ -3,7 +3,7 @@
 ASM = vasmm68k_mot
 AFLAGS = -Fbin -m68000 -no-opt -I$(SRCDIR)
 
-SRCDIR = src
+SRCDIR = src/rom
 BUILDDIR = build
 
 ROM = $(BUILDDIR)/kick.rom

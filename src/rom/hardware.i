@@ -134,11 +134,33 @@ ROM_START       equ $FC0000
 ROM_END         equ $FFFFFF
 
 ; ============================================================
-; Our memory map
+; Our memory map (follows docs/rom_design.md)
 ; ============================================================
-SCREEN          equ $20000          ; Display bitplanes
-COPPERLIST      equ $1F000          ; Copper list
-STACK           equ $7FFFE          ; Stack (top of chip RAM)
+REG_DUMP_AREA   equ $000400         ; Register dump (80 bytes)
+HEX_BUFFER      equ $000450         ; Hex output buffer (12 bytes)
+CHIP_RAM_VAR    equ $000460         ; ChipRAMSize variable (4 bytes)
+FAST_RAM_VAR    equ $000464         ; FastRAMSize variable (4 bytes)
+DBG_STACK       equ $00084F         ; Debugger stack top
+DBG_CMD_BUF     equ $000850         ; Command buffer (128 bytes)
+COPPERLIST      equ $000950         ; Copper list (256 bytes)
+SCREEN          equ $000A50         ; Display bitplane (10KB)
+MEMMAP_TABLE    equ $003250         ; Memory map (432 bytes)
+KERNEL_CHIP     equ $004000         ; Kernel-managed chip RAM start
+
+; ============================================================
+; ROM identification
+; ============================================================
+ROM_MAGIC       equ $414D4147       ; 'AMAG'
+ROM_VERSION     equ $0001           ; Version 0.1
+ROM_FLAGS       equ $0000           ; No flags
+
+; ============================================================
+; Memory map types
+; ============================================================
+MEM_TYPE_FREE   equ 1               ; Available RAM
+MEM_TYPE_ROM    equ 2               ; Read-only memory
+MEM_TYPE_RESERVED equ 3             ; Reserved (vectors, ROM data)
+MEM_TYPE_END    equ 0               ; Table terminator
 
 ; ============================================================
 ; Display constants

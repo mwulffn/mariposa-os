@@ -29,28 +29,28 @@ DEBUG_MSG_Y         equ 20
 ; ============================================================
 ; Register save area (fixed location in chip RAM)
 ; ============================================================
-SAVE_AREA       equ $1000           ; Safe area below screen
+; Uses REG_DUMP_AREA from hardware.i ($400)
 
-SavedRegs       equ SAVE_AREA
-SavedD0         equ SAVE_AREA+$00
-SavedD1         equ SAVE_AREA+$04
-SavedD2         equ SAVE_AREA+$08
-SavedD3         equ SAVE_AREA+$0C
-SavedD4         equ SAVE_AREA+$10
-SavedD5         equ SAVE_AREA+$14
-SavedD6         equ SAVE_AREA+$18
-SavedD7         equ SAVE_AREA+$1C
-SavedA0         equ SAVE_AREA+$20
-SavedA1         equ SAVE_AREA+$24
-SavedA2         equ SAVE_AREA+$28
-SavedA3         equ SAVE_AREA+$2C
-SavedA4         equ SAVE_AREA+$30
-SavedA5         equ SAVE_AREA+$34
-SavedA6         equ SAVE_AREA+$38
-SavedA7         equ SAVE_AREA+$3C
-SavedSR         equ SAVE_AREA+$40
-SavedPC         equ SAVE_AREA+$44
-PanicMsgPtr    equ SAVE_AREA+$48
+SavedRegs       equ REG_DUMP_AREA
+SavedD0         equ REG_DUMP_AREA+$00
+SavedD1         equ REG_DUMP_AREA+$04
+SavedD2         equ REG_DUMP_AREA+$08
+SavedD3         equ REG_DUMP_AREA+$0C
+SavedD4         equ REG_DUMP_AREA+$10
+SavedD5         equ REG_DUMP_AREA+$14
+SavedD6         equ REG_DUMP_AREA+$18
+SavedD7         equ REG_DUMP_AREA+$1C
+SavedA0         equ REG_DUMP_AREA+$20
+SavedA1         equ REG_DUMP_AREA+$24
+SavedA2         equ REG_DUMP_AREA+$28
+SavedA3         equ REG_DUMP_AREA+$2C
+SavedA4         equ REG_DUMP_AREA+$30
+SavedA5         equ REG_DUMP_AREA+$34
+SavedA6         equ REG_DUMP_AREA+$38
+SavedA7         equ REG_DUMP_AREA+$3C
+SavedSR         equ REG_DUMP_AREA+$40
+SavedPC         equ REG_DUMP_AREA+$44
+PanicMsgPtr    equ REG_DUMP_AREA+$48
 
 ; ============================================================
 ; Debug - Main entry point
