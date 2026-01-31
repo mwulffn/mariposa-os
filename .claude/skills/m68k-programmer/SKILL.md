@@ -1,4 +1,19 @@
-# M68K Amiga Development Skill
+---
+name: m68k-programmer
+description: Use this skill when implementing assembly code on the motorola 68000 cpu with vasm
+---
+# M68K Amiga Development
+
+Expert knowledge for Motorola 68000 assembly programming on Amiga hardware.
+
+## When to Use This Skill
+
+Invoke this skill when:
+- Writing or debugging 68000 assembly code
+- Working with Amiga custom chip registers
+- Troubleshooting hardware access issues
+- Setting up serial debugging
+- Dealing with assembly syntax errors
 
 ## Assembler: VASM (Motorola syntax)
 
@@ -143,3 +158,42 @@ Once the ROM debugger is complete, Claude Code can interact with it via serial s
 
 ### FS-UAE debugger (human only)
 F12+D enters FS-UAE's built-in debugger - not accessible to Claude Code.
+
+## Common Issues and Solutions
+
+### Assembly fails with "illegal use of reserved word"
+- Check if using DEBUG, RESET, AND, OR, NOT, EOR as labels
+- Rename to Panic, Start, AndMask, etc.
+
+### "Address error" exception
+- Check word/longword alignment (must be even addresses)
+- Add `even` directive after byte data
+
+### Chip RAM writes don't work
+- ROM overlay not disabled - clear CIAA_PRA bit 0 first
+- Check that writes are to $000000-$07FFFF range
+
+### Serial output not appearing
+- Verify SERPER is set (baud rate)
+- Check TBE (transmit buffer empty) flag before writing
+- Ensure FS-UAE serial_port config is correct
+
+### Code hangs without visible error
+- Use color debugging: `move.w #$F00,COLOR00(a6)`
+- Add serial debug output at key points
+- Check if stuck in wait loop (blitter, vblank)
+
+## Quick Reference Card
+
+| Task | Code Pattern |
+|------|--------------|
+| Disable ROM overlay | `move.b #$00,CIAA_PRA` |
+| Set custom chip base | `lea CUSTOM,a6` |
+| Write register | `move.w value,REGISTER(a6)` |
+| Save all registers | `movem.l d0-d7/a0-a6,-(sp)` |
+| Restore registers | `movem.l (sp)+,d0-d7/a0-a6` |
+| Debug color | `move.w #$XXX,COLOR00(a6)` |
+| Serial char out | See SerPutc pattern above |
+| Wait blitter | See WaitBlit pattern above |
+| Align data | `even` directive |
+| Local label | `.label_name` |
