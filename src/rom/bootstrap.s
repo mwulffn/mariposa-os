@@ -58,20 +58,8 @@ Start:
     ; ============================================================
     ; 3. MEMORY DETECTION
     ; ============================================================
-    bsr     DetectChipRAM       ; Returns size in d0
-    move.l  d0,CHIP_RAM_VAR
-
-    bsr     TestChipRAM         ; Test chip RAM (halts on yellow if fail)
-
-    bsr     DetectSlowRAM       ; Returns size in d0
-    move.l  d0,SLOW_RAM_VAR
-
-    ; A500 has Zorro I with AutoConfig
-    bsr     ConfigureZorroII    ; Configure expansion cards
-    bsr     DetectFastRAM       ; Returns size in d0
-    move.l  d0,FAST_RAM_VAR
-
-    bsr     BuildMemoryMap
+    bsr     ConfigureZorroII    ; Must be first (for fast RAM)
+    bsr     BuildMemoryTable    ; Detects, tests, builds table
 
     ; ============================================================
     ; 4. SERIAL INIT
@@ -84,24 +72,6 @@ Start:
 
     ; Print memory map table
     bsr     PrintMemoryMap
-
-    ; Print detected chip RAM
-    move.l  CHIP_RAM_VAR,-(sp)
-    pea     .chip_fmt(pc)
-    bsr     SerialPrintf
-    addq.l  #8,sp
-
-    ; Print detected slow RAM
-    move.l  SLOW_RAM_VAR,-(sp)
-    pea     .slow_fmt(pc)
-    bsr     SerialPrintf
-    addq.l  #8,sp
-
-    ; Print detected fast RAM
-    move.l  FAST_RAM_VAR,-(sp)
-    pea     .fast_fmt(pc)
-    bsr     SerialPrintf
-    addq.l  #8,sp
 
     ; ============================================================
     ; 5. SUCCESS HALT - BRIGHT GREEN SCREEN
@@ -118,14 +88,6 @@ Start:
 
     ; Enter interactive debugger
     jmp     DebuggerEntry
-
-.chip_fmt:
-    dc.b    "Chip RAM: $%.lx bytes",10,13,0
-.slow_fmt:
-    dc.b    "Slow RAM: $%.lx bytes",10,13,0
-.fast_fmt:
-    dc.b    "Fast RAM: $%.lx bytes",10,13,0
-    even
 
 ; ============================================================
 ; InstallExceptionVectors - Install all exception handlers
@@ -299,102 +261,6 @@ InitCopper:
 
     movem.l (sp)+,a0
     rts
-
-; ============================================================
-; PrintMemoryMap - Output memory map table to serial port
-; ============================================================
-; Reads the memory map table and formats each entry for display
-; Entry format: 12 bytes (base, size, type, flags)
-; ============================================================
-PrintMemoryMap:
-    movem.l d0-d5/a0-a2,-(sp)
-
-    ; Print header
-    pea     .header(pc)
-    bsr     SerialPrintf
-    addq.l  #4,sp
-
-    ; Start at beginning of memory map table
-    lea     MEMMAP_TABLE,a1
-
-.entry_loop:
-    ; Read entry
-    move.l  (a1)+,d0        ; base
-    move.l  (a1)+,d1        ; size
-    move.w  (a1)+,d2        ; type
-    moveq   #0,d3
-    move.w  (a1)+,d3        ; flags
-
-    ; Check for end of table (base=0, size=0)
-    tst.l   d0
-    bne.s   .print_entry
-    tst.l   d1
-    beq.w   .done
-
-.print_entry:
-    ; Calculate end address (base + size - 1)
-    move.l  d0,d4
-    add.l   d1,d4
-    subq.l  #1,d4
-
-    ; Convert size to KB (divide by 1024)
-    move.l  d1,d5
-    lsr.l   #8,d5           ; /256
-    lsr.l   #2,d5           ; /4 more = /1024 total
-
-    ; Get type string pointer
-    lea     .type_reserved(pc),a2
-    cmp.w   #MEM_TYPE_RESERVED,d2
-    beq.s   .got_type
-    lea     .type_free(pc),a2
-    cmp.w   #MEM_TYPE_FREE,d2
-    beq.s   .got_type
-    lea     .type_rom(pc),a2
-
-.got_type:
-    ; Print entry: "  $BASE-$END: TYPE ($SIZE KB)"
-    move.l  d5,-(sp)        ; size in KB
-    move.l  a2,-(sp)        ; type string
-    move.l  d4,-(sp)        ; end address
-    move.l  d0,-(sp)        ; base address
-    pea     .entry_fmt(pc)
-    bsr     SerialPrintf
-    lea     20(sp),sp       ; Clean 5 items
-
-    ; Print DMA flag if set
-    btst    #0,d3
-    beq.s   .no_dma
-    pea     .dma_flag(pc)
-    bsr     SerialPrintf
-    addq.l  #4,sp
-
-.no_dma:
-    ; Print newline
-    pea     .newline(pc)
-    bsr     SerialPrintf
-    addq.l  #4,sp
-
-    bra     .entry_loop
-
-.done:
-    movem.l (sp)+,d0-d5/a0-a2
-    rts
-
-.header:
-    dc.b    "Memory Map:",10,13,0
-.entry_fmt:
-    dc.b    "  $%.lx-$%.lx: %s ($%.lx KB)",0
-.dma_flag:
-    dc.b    " [DMA]",0
-.newline:
-    dc.b    10,13,0
-.type_reserved:
-    dc.b    "Reserved",0
-.type_free:
-    dc.b    "Free",0
-.type_rom:
-    dc.b    "ROM",0
-    even
 
 ; ============================================================
 ; Data

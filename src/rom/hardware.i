@@ -152,10 +152,6 @@ ROM_END         equ $FFFFFF
 ; Our memory map (follows docs/rom_design.md)
 ; ============================================================
 REG_DUMP_AREA   equ $000400         ; Register dump (80 bytes)
-CHIP_RAM_VAR    equ $000460         ; ChipRAMSize variable (4 bytes)
-SLOW_RAM_VAR    equ $000464         ; SlowRAMSize variable (4 bytes)
-FAST_RAM_VAR    equ $000468         ; FastRAMSize variable (4 bytes)
-FAST_RAM_BASE   equ $00046C         ; FastRAMBase address (4 bytes)
 DBG_STACK       equ $00084F         ; Debugger stack top
 DBG_CMD_BUF     equ $000850         ; Command buffer (128 bytes)
 DBG_BUF_IDX     equ $0008D0         ; Command buffer index

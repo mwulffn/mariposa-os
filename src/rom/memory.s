@@ -81,54 +81,8 @@ DetectChipRAM:
     rts
 
 ; ============================================================
-; DetectSlowRAM - Detect slow RAM (trapdoor expansion)
-; Returns: d0.l = slow RAM size in bytes (0 if none)
-; ============================================================
-; Slow RAM starts at $C00000, typically 512KB on A500
-; Maximum is 1.8MB but most expansions are 512KB
-; ============================================================
-DetectSlowRAM:
-    movem.l d1-d2/a0,-(sp)
-
-    ; Probe $C00000 for presence
-    lea     SLOW_RAM_START,a0
-    move.l  #$AA55AA55,d1
-    move.l  (a0),d2             ; Save original
-    move.l  d1,(a0)
-    cmp.l   (a0),d1
-    bne.s   .no_slow
-    move.l  d2,(a0)             ; Restore
-
-    ; Slow RAM detected, now size it
-    ; Test 512KB boundaries up to 1.8MB
-    move.l  #$080000,d0         ; Start with 512KB
-
-.size_loop:
-    cmp.l   #$180000,d0         ; Max 1.8MB
-    bge.s   .done
-
-    lea     SLOW_RAM_START,a0
-    add.l   d0,a0
-    move.l  (a0),d2
-    move.l  d1,(a0)
-    cmp.l   (a0),d1
-    bne.s   .done
-    move.l  d2,(a0)
-
-    add.l   #$080000,d0         ; Next 512KB
-    bra.s   .size_loop
-
-.no_slow:
-    moveq   #0,d0
-
-.done:
-    movem.l (sp)+,d1-d2/a0
-    rts
-
-; ============================================================
 ; DetectFastRAM - Detect fast RAM (Zorro expansion)
 ; Returns: d0.l = fast RAM size in bytes (0 if none)
-; Side effect: Stores base address in FAST_RAM_BASE
 ; ============================================================
 ; Probes $200000 for Zorro II RAM (must call ConfigureZorroII first!)
 ; ============================================================
@@ -144,9 +98,6 @@ DetectFastRAM:
     bne.s   .no_fast
     move.l  d2,(a0)
     move.l  #$200000,d3         ; Base address
-
-    ; Store base address
-    move.l  d3,FAST_RAM_BASE
 
     ; Size the fast RAM in 1MB increments (faster for large blocks)
     move.l  #$100000,d0         ; Start with 1MB
@@ -167,7 +118,6 @@ DetectFastRAM:
     bra.s   .size_loop
 
 .no_fast:
-    clr.l   FAST_RAM_BASE
     moveq   #0,d0
 
 .done:
@@ -176,42 +126,36 @@ DetectFastRAM:
 
 ; ============================================================
 ; TestChipRAM - Quick test of chip RAM
-; If failure: sets COLOR00=$FF0 (yellow) and halts
+; ============================================================
+; Input: d2.l = chip RAM size limit
+; On failure: sets COLOR00=$FF0 (yellow) and halts (does not return)
+; On success: returns normally
 ; ============================================================
 TestChipRAM:
-    movem.l d0-d2/a0-a1,-(sp)
+    movem.l d0/d3/a0-a1,-(sp)
     lea     CUSTOM,a1
-
-    ; Get chip RAM size
-    move.l  CHIP_RAM_VAR,d1
-
-    ; Start at $4000 (after our data structures)
-    move.l  #$4000,a0
+    move.l  #$4000,a0           ; Start after reserved area
 
 .test_loop:
-    ; Test this 4KB block
-    move.l  #$AA55AA55,d2
+    move.l  #$AA55AA55,d3
     move.l  (a0),d0             ; Save original
-    move.l  d2,(a0)
-    cmp.l   (a0),d2
-    bne.s   .fail
-    not.l   d2
-    move.l  d2,(a0)
-    cmp.l   (a0),d2
-    bne.s   .fail
+    move.l  d3,(a0)
+    cmp.l   (a0),d3
+    bne.s   .test_fail
+    not.l   d3
+    move.l  d3,(a0)
+    cmp.l   (a0),d3
+    bne.s   .test_fail
     move.l  d0,(a0)             ; Restore
-
-    ; Next 4KB block
-    add.l   #$1000,a0
-    cmp.l   d1,a0
+    add.l   #$1000,a0           ; Next 4KB
+    cmp.l   d2,a0
     blt.s   .test_loop
 
     ; Success
-    movem.l (sp)+,d0-d2/a0-a1
+    movem.l (sp)+,d0/d3/a0-a1
     rts
 
-.fail:
-    ; Set yellow screen and halt
+.test_fail:
     move.w  #$FF0,COLOR00(a1)
     lea     MemTestFailMsg(pc),a0
     bsr     SerialPutString
@@ -219,66 +163,156 @@ TestChipRAM:
     bra.s   .halt
 
 ; ============================================================
-; BuildMemoryMap - Create comprehensive memory map table
+; BuildMemoryTable - Detect memory, build table, test chip RAM
 ; ============================================================
-; Memory map format (12 bytes per entry):
-;   +0: Base address (long)
-;   +4: Size in bytes (long)
-;   +8: Type (word) - 0=Reserved, 1=Free, 2=ROM
-;  +10: Flags (word) - bit 0: DMA capable
+; On failure: sets COLOR00=$FF0 (yellow) and halts
 ; ============================================================
-BuildMemoryMap:
-    movem.l d0-d1/a0,-(sp)
+BuildMemoryTable:
+    movem.l d0-d3/a0-a1,-(sp)
     lea     MEMMAP_TABLE,a0
 
-    ; Entry 1: Reserved low chip RAM ($000-$3FFF)
-    move.l  #$00000000,(a0)+    ; Base
-    move.l  #KERNEL_CHIP,(a0)+  ; Size
-    move.w  #MEM_TYPE_RESERVED,(a0)+ ; Type
-    move.w  #$0001,(a0)+        ; Flags: DMA capable
+    ; Entry 1: Reserved low chip RAM
+    move.l  #$00000000,(a0)+
+    move.l  #KERNEL_CHIP,(a0)+
+    move.w  #MEM_TYPE_RESERVED,(a0)+
+    move.w  #$0001,(a0)+        ; DMA capable
 
-    ; Entry 2: Free chip RAM ($4000 to detected size)
+    ; Detect and add chip RAM entry
+    bsr     DetectChipRAM       ; d0 = size
+    move.l  d0,d2               ; Save total chip size for test
     move.l  #KERNEL_CHIP,(a0)+  ; Base
-    move.l  CHIP_RAM_VAR,d0
-    sub.l   #KERNEL_CHIP,d0
-    move.l  d0,(a0)+            ; Size
-    move.w  #MEM_TYPE_FREE,(a0)+ ; Type
-    move.w  #$0001,(a0)+        ; Flags: DMA capable
+    move.l  d0,d1
+    sub.l   #KERNEL_CHIP,d1
+    move.l  d1,(a0)+            ; Size (total - reserved)
+    move.w  #MEM_TYPE_FREE,(a0)+
+    move.w  #$0001,(a0)+        ; DMA capable
 
-    ; Entry 3: Slow RAM (if any)
-    move.l  SLOW_RAM_VAR,d1
-    tst.l   d1
-    beq.s   .no_slow
-    move.l  #SLOW_RAM_START,(a0)+ ; Base
-    move.l  d1,(a0)+            ; Size
-    move.w  #MEM_TYPE_FREE,(a0)+ ; Type
-    move.w  #$0000,(a0)+        ; Flags: Not DMA capable
+    ; Test chip RAM before continuing (d2 = chip RAM size limit)
+    bsr     TestChipRAM
 
-.no_slow:
-    ; Entry 4: Fast RAM (if any)
-    move.l  FAST_RAM_VAR,d1
-    tst.l   d1
+    ; Restore a0 to continue building table
+    lea     MEMMAP_TABLE+24,a0  ; After 2 entries (12 bytes each)
+
+    ; Detect and add fast RAM entry (if any)
+    bsr     DetectFastRAM       ; d0 = size
+    tst.l   d0
     beq.s   .no_fast
-    move.l  FAST_RAM_BASE,(a0)+ ; Base ($200000 after autoconfig)
-    move.l  d1,(a0)+            ; Size
-    move.w  #MEM_TYPE_FREE,(a0)+ ; Type
-    move.w  #$0000,(a0)+        ; Flags: Not DMA capable
+    move.l  #$200000,(a0)+      ; Base (Zorro II)
+    move.l  d0,(a0)+            ; Size
+    move.w  #MEM_TYPE_FREE,(a0)+
+    move.w  #$0000,(a0)+        ; Not DMA capable
 
 .no_fast:
-    ; Entry 5: ROM
+    ; ROM entry
     move.l  #ROM_START,(a0)+
-    move.l  #$040000,(a0)+      ; 256KB
+    move.l  #$040000,(a0)+
     move.w  #MEM_TYPE_ROM,(a0)+
     move.w  #$0000,(a0)+
 
-    ; Terminate with null entry
-    move.l  #$00000000,(a0)+
-    move.l  #$00000000,(a0)+
-    move.w  #$0000,(a0)+
-    move.w  #$0000,(a0)+
+    ; Terminator
+    clr.l   (a0)+
+    clr.l   (a0)+
+    clr.w   (a0)+
+    clr.w   (a0)+
 
-    movem.l (sp)+,d0-d1/a0
+    movem.l (sp)+,d0-d3/a0-a1
     rts
+
+; ============================================================
+; PrintMemoryMap - Output memory map table to serial port
+; ============================================================
+; Reads the memory map table and formats each entry for display
+; Entry format: 12 bytes (base, size, type, flags)
+; ============================================================
+PrintMemoryMap:
+    movem.l d0-d5/a0-a2,-(sp)
+
+    ; Print header
+    pea     .header(pc)
+    bsr     SerialPrintf
+    addq.l  #4,sp
+
+    ; Start at beginning of memory map table
+    lea     MEMMAP_TABLE,a1
+
+.entry_loop:
+    ; Read entry
+    move.l  (a1)+,d0        ; base
+    move.l  (a1)+,d1        ; size
+    move.w  (a1)+,d2        ; type
+    moveq   #0,d3
+    move.w  (a1)+,d3        ; flags
+
+    ; Check for end of table (base=0, size=0)
+    tst.l   d0
+    bne.s   .print_entry
+    tst.l   d1
+    beq.w   .done
+
+.print_entry:
+    ; Calculate end address (base + size - 1)
+    move.l  d0,d4
+    add.l   d1,d4
+    subq.l  #1,d4
+
+    ; Convert size to KB (divide by 1024)
+    move.l  d1,d5
+    lsr.l   #8,d5           ; /256
+    lsr.l   #2,d5           ; /4 more = /1024 total
+
+    ; Get type string pointer
+    lea     .type_reserved(pc),a2
+    cmp.w   #MEM_TYPE_RESERVED,d2
+    beq.s   .got_type
+    lea     .type_free(pc),a2
+    cmp.w   #MEM_TYPE_FREE,d2
+    beq.s   .got_type
+    lea     .type_rom(pc),a2
+
+.got_type:
+    ; Print entry: "  $BASE-$END: TYPE ($SIZE KB)"
+    move.l  d5,-(sp)        ; size in KB
+    move.l  a2,-(sp)        ; type string
+    move.l  d4,-(sp)        ; end address
+    move.l  d0,-(sp)        ; base address
+    pea     .entry_fmt(pc)
+    bsr     SerialPrintf
+    lea     20(sp),sp       ; Clean 5 items
+
+    ; Print DMA flag if set
+    btst    #0,d3
+    beq.s   .no_dma
+    pea     .dma_flag(pc)
+    bsr     SerialPrintf
+    addq.l  #4,sp
+
+.no_dma:
+    ; Print newline
+    pea     .newline(pc)
+    bsr     SerialPrintf
+    addq.l  #4,sp
+
+    bra     .entry_loop
+
+.done:
+    movem.l (sp)+,d0-d5/a0-a2
+    rts
+
+.header:
+    dc.b    "Memory Map:",10,13,0
+.entry_fmt:
+    dc.b    "  $%.lx-$%.lx: %s ($%.lx KB)",0
+.dma_flag:
+    dc.b    " [DMA]",0
+.newline:
+    dc.b    10,13,0
+.type_reserved:
+    dc.b    "Reserved",0
+.type_free:
+    dc.b    "Free",0
+.type_rom:
+    dc.b    "ROM",0
+    even
 
 ; ============================================================
 ; Data
