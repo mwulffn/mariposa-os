@@ -88,24 +88,30 @@ Start:
     ; Print detected chip RAM
     lea     ChipRAMMsg(pc),a0
     bsr     SerialPutString
+    move.b  #'$',d0
+    bsr     SerialPutChar
     move.l  CHIP_RAM_VAR,d0
-    bsr     SerialPutHex
+    bsr     SerialPutHex32
     lea     BytesMsg(pc),a0
     bsr     SerialPutString
 
     ; Print detected slow RAM
     lea     SlowRAMMsg(pc),a0
     bsr     SerialPutString
+    move.b  #'$',d0
+    bsr     SerialPutChar
     move.l  SLOW_RAM_VAR,d0
-    bsr     SerialPutHex
+    bsr     SerialPutHex32
     lea     BytesMsg(pc),a0
     bsr     SerialPutString
 
     ; Print detected fast RAM
     lea     FastRAMMsg(pc),a0
     bsr     SerialPutString
+    move.b  #'$',d0
+    bsr     SerialPutChar
     move.l  FAST_RAM_VAR,d0
-    bsr     SerialPutHex
+    bsr     SerialPutHex32
     lea     BytesMsg(pc),a0
     bsr     SerialPutString
 
@@ -338,7 +344,11 @@ PrintMemoryMap:
 
     ; Print base address
     move.l  d0,-(sp)
-    bsr     SerialPutHex
+    move.b  #'$',d0
+    bsr     SerialPutChar
+    move.l  (sp)+,d0
+    move.l  d0,-(sp)
+    bsr     SerialPutHex32
     move.l  (sp)+,d0
 
     ; Print "-"
@@ -350,8 +360,10 @@ PrintMemoryMap:
     move.l  d0,d4
     add.l   d1,d4
     subq.l  #1,d4
+    move.b  #'$',d0
+    bsr     SerialPutChar
     move.l  d4,d0
-    bsr     SerialPutHex
+    bsr     SerialPutHex32
 
     ; Print ": "
     lea     ColonSpaceMsg(pc),a0
@@ -389,7 +401,11 @@ PrintMemoryMap:
     move.l  d1,d0
     lsr.l   #8,d0           ; /256
     lsr.l   #2,d0           ; /4 more = /1024 total
-    bsr     SerialPutHex    ; Use hex for simplicity
+    move.l  d0,-(sp)
+    move.b  #'$',d0
+    bsr     SerialPutChar
+    move.l  (sp)+,d0
+    bsr     SerialPutHex32  ; Use hex for simplicity
 
     lea     KBCloseMsg(pc),a0
     bsr     SerialPutString

@@ -500,7 +500,11 @@ CmdMemory:
 .dump_mode:
     ; Print address
     move.l  a1,d0
-    bsr     SerialPutHex
+    move.l  d0,-(sp)
+    move.b  #'$',d0
+    bsr     SerialPutChar
+    move.l  (sp)+,d0
+    bsr     SerialPutHex32
 
     lea     .colon(pc),a0
     bsr     SerialPutString
@@ -541,7 +545,7 @@ CmdMemory:
     move.b  #' ',d0
     bsr     SerialPutChar
     move.l  (a1)+,d0
-    bsr     SerialPutHex
+    bsr     SerialPutHex32
     dbf     d4,.dump_long_loop
     bra     .done
 

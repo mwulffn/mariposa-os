@@ -70,7 +70,7 @@ ConfigureZorroII:
     moveq   #0,d5               ; Use d5 for printing (preserve d0!)
     move.b  3(sp),d5
     move.l  d5,d0
-    bsr     SerialPutHex
+    bsr     SerialPutHex32
     lea     NewlineMsg(pc),a0
     bsr     SerialPutString
     move.l  (sp)+,d1
@@ -112,7 +112,7 @@ ConfigureZorroII:
     moveq   #0,d5
     move.b  7(sp),d5            ; Get from stack (adjusted offset)
     move.l  d5,d0
-    bsr     SerialPutHex
+    bsr     SerialPutHex32
     lea     NewlineMsg(pc),a0
     bsr     SerialPutString
     move.l  (sp)+,d1
@@ -130,7 +130,7 @@ ConfigureZorroII:
     moveq   #0,d5
     move.b  7(sp),d5
     move.l  d5,d0
-    bsr     SerialPutHex
+    bsr     SerialPutHex32
     lea     NewlineMsg(pc),a0
     bsr     SerialPutString
     move.l  (sp)+,d2
@@ -156,8 +156,10 @@ ConfigureZorroII:
     ; Debug: print base address
     lea     AllocatingAtMsg(pc),a0
     bsr     SerialPutString
+    move.b  #'$',d0
+    bsr     SerialPutChar
     move.l  d3,d0
-    bsr     SerialPutHex
+    bsr     SerialPutHex32
     lea     NewlineMsg(pc),a0
     bsr     SerialPutString
 
@@ -245,9 +247,11 @@ ConfigureZorroII:
     ; Debug: print size code
     lea     SizeCodeMsg(pc),a0
     bsr     SerialPutString
+    move.b  #'$',d0
+    bsr     SerialPutChar
     move.l  d1,d5               ; Use d5 for printing (preserve d0!)
     move.l  d5,d0
-    bsr     SerialPutHex
+    bsr     SerialPutHex32
     lea     NewlineMsg(pc),a0
     bsr     SerialPutString
 
@@ -267,9 +271,11 @@ ConfigureZorroII:
     ; Debug: print calculated size
     lea     CalcSizeMsg(pc),a0
     bsr     SerialPutString
+    move.b  #'$',d0
+    bsr     SerialPutChar
     move.l  d2,d5               ; Use d5 for printing (preserve d0!)
     move.l  d5,d0
-    bsr     SerialPutHex
+    bsr     SerialPutHex32
     lea     NewlineMsg(pc),a0
     bsr     SerialPutString
 
@@ -301,7 +307,11 @@ ConfigureZorroII:
     lea     AutoconfigDoneMsg(pc),a0
     bsr     SerialPutString
     move.l  d0,-(sp)
-    bsr     SerialPutHex
+    move.b  #'$',d0
+    bsr     SerialPutChar
+    move.l  (sp)+,d0
+    move.l  d0,-(sp)
+    bsr     SerialPutHex32
     lea     NewlineMsg(pc),a0
     bsr     SerialPutString
     move.l  (sp)+,d0

@@ -136,14 +136,13 @@ SerialPutHex16:
     rts
 
 ; ============================================================
-; SerialPutHex - Print 32-bit hex value
+; SerialPutHex32 - Print 32-bit hex value (8 digits, no prefix)
 ; ============================================================
-; D0.l = value to print (with '$' prefix)
+; D0.l = value to print
 ; Modifies: D0-D2, A0, A6
-SerialPutHex:
+SerialPutHex32:
     movem.l d0-d2/a0,-(sp)
     lea     HEX_BUFFER,a0
-    move.b  #'$',(a0)+
 
     moveq   #7,d2               ; 8 hex digits
 .loop:
