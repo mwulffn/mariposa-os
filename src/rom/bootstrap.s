@@ -86,34 +86,22 @@ Start:
     bsr     PrintMemoryMap
 
     ; Print detected chip RAM
-    lea     ChipRAMMsg(pc),a0
-    bsr     SerialPutString
-    move.b  #'$',d0
-    bsr     SerialPutChar
-    move.l  CHIP_RAM_VAR,d0
-    bsr     SerialPutHex32
-    lea     BytesMsg(pc),a0
-    bsr     SerialPutString
+    move.l  CHIP_RAM_VAR,-(sp)
+    pea     .chip_fmt(pc)
+    bsr     SerialPrintf
+    addq.l  #8,sp
 
     ; Print detected slow RAM
-    lea     SlowRAMMsg(pc),a0
-    bsr     SerialPutString
-    move.b  #'$',d0
-    bsr     SerialPutChar
-    move.l  SLOW_RAM_VAR,d0
-    bsr     SerialPutHex32
-    lea     BytesMsg(pc),a0
-    bsr     SerialPutString
+    move.l  SLOW_RAM_VAR,-(sp)
+    pea     .slow_fmt(pc)
+    bsr     SerialPrintf
+    addq.l  #8,sp
 
     ; Print detected fast RAM
-    lea     FastRAMMsg(pc),a0
-    bsr     SerialPutString
-    move.b  #'$',d0
-    bsr     SerialPutChar
-    move.l  FAST_RAM_VAR,d0
-    bsr     SerialPutHex32
-    lea     BytesMsg(pc),a0
-    bsr     SerialPutString
+    move.l  FAST_RAM_VAR,-(sp)
+    pea     .fast_fmt(pc)
+    bsr     SerialPrintf
+    addq.l  #8,sp
 
     ; ============================================================
     ; 5. SUCCESS HALT - BRIGHT GREEN SCREEN
@@ -130,6 +118,14 @@ Start:
 
     ; Enter interactive debugger
     jmp     DebuggerEntry
+
+.chip_fmt:
+    dc.b    "Chip RAM: $%.lx bytes",10,13,0
+.slow_fmt:
+    dc.b    "Slow RAM: $%.lx bytes",10,13,0
+.fast_fmt:
+    dc.b    "Fast RAM: $%.lx bytes",10,13,0
+    even
 
 ; ============================================================
 ; InstallExceptionVectors - Install all exception handlers
@@ -311,183 +307,100 @@ InitCopper:
 ; Entry format: 12 bytes (base, size, type, flags)
 ; ============================================================
 PrintMemoryMap:
-    movem.l d0-d4/a0-a1,-(sp)
+    movem.l d0-d5/a0-a2,-(sp)
 
     ; Print header
-    lea     MemMapHeaderMsg(pc),a0
-    bsr     SerialPutString
+    pea     .header(pc)
+    bsr     SerialPrintf
+    addq.l  #4,sp
 
     ; Start at beginning of memory map table
     lea     MEMMAP_TABLE,a1
 
 .entry_loop:
-    ; Read base address
-    move.l  (a1)+,d0
-    ; Read size
-    move.l  (a1)+,d1
-    ; Read type (word)
-    move.w  (a1)+,d2
-    ; Read flags (word) and mask to clear upper word
+    ; Read entry
+    move.l  (a1)+,d0        ; base
+    move.l  (a1)+,d1        ; size
+    move.w  (a1)+,d2        ; type
     moveq   #0,d3
-    move.w  (a1)+,d3
+    move.w  (a1)+,d3        ; flags
 
     ; Check for end of table (base=0, size=0)
     tst.l   d0
-    bne.w   .print_entry
+    bne.s   .print_entry
     tst.l   d1
     beq.w   .done
 
 .print_entry:
-    ; Print "  "
-    lea     IndentMsg(pc),a0
-    bsr     SerialPutString
-
-    ; Print base address
-    move.l  d0,-(sp)
-    move.b  #'$',d0
-    bsr     SerialPutChar
-    move.l  (sp)+,d0
-    move.l  d0,-(sp)
-    bsr     SerialPutHex32
-    move.l  (sp)+,d0
-
-    ; Print "-"
-    lea     DashMsg(pc),a0
-    bsr     SerialPutString
-
-    ; Calculate and print end address (base + size - 1)
-    ; Use d4 temporarily, don't overwrite d3 (flags!)
+    ; Calculate end address (base + size - 1)
     move.l  d0,d4
     add.l   d1,d4
     subq.l  #1,d4
-    move.b  #'$',d0
-    bsr     SerialPutChar
-    move.l  d4,d0
-    bsr     SerialPutHex32
 
-    ; Print ": "
-    lea     ColonSpaceMsg(pc),a0
-    bsr     SerialPutString
+    ; Convert size to KB (divide by 1024)
+    move.l  d1,d5
+    lsr.l   #8,d5           ; /256
+    lsr.l   #2,d5           ; /4 more = /1024 total
 
-    ; Print type name
+    ; Get type string pointer
+    lea     .type_reserved(pc),a2
     cmp.w   #MEM_TYPE_RESERVED,d2
-    beq.w   .print_reserved
+    beq.s   .got_type
+    lea     .type_free(pc),a2
     cmp.w   #MEM_TYPE_FREE,d2
-    beq.w   .print_free
-    cmp.w   #MEM_TYPE_ROM,d2
-    beq.w   .print_rom
-    bra.w   .print_size
+    beq.s   .got_type
+    lea     .type_rom(pc),a2
 
-.print_reserved:
-    lea     ReservedMsg(pc),a0
-    bsr     SerialPutString
-    bra.w   .print_size
+.got_type:
+    ; Print entry: "  $BASE-$END: TYPE ($SIZE KB)"
+    move.l  d5,-(sp)        ; size in KB
+    move.l  a2,-(sp)        ; type string
+    move.l  d4,-(sp)        ; end address
+    move.l  d0,-(sp)        ; base address
+    pea     .entry_fmt(pc)
+    bsr     SerialPrintf
+    lea     20(sp),sp       ; Clean 5 items
 
-.print_free:
-    lea     FreeMsg(pc),a0
-    bsr     SerialPutString
-    bra.w   .print_size
-
-.print_rom:
-    lea     ROMMsg(pc),a0
-    bsr     SerialPutString
-
-.print_size:
-    ; Print size in KB
-    lea     OpenParenMsg(pc),a0
-    bsr     SerialPutString
-
-    ; Convert bytes to KB (divide by 1024)
-    move.l  d1,d0
-    lsr.l   #8,d0           ; /256
-    lsr.l   #2,d0           ; /4 more = /1024 total
-    move.l  d0,-(sp)
-    move.b  #'$',d0
-    bsr     SerialPutChar
-    move.l  (sp)+,d0
-    bsr     SerialPutHex32  ; Use hex for simplicity
-
-    lea     KBCloseMsg(pc),a0
-    bsr     SerialPutString
-
-    ; Print flags if DMA capable
+    ; Print DMA flag if set
     btst    #0,d3
     beq.s   .no_dma
-    lea     DMAFlagMsg(pc),a0
-    bsr     SerialPutString
+    pea     .dma_flag(pc)
+    bsr     SerialPrintf
+    addq.l  #4,sp
 
 .no_dma:
     ; Print newline
-    lea     NewlineMsg(pc),a0
-    bsr     SerialPutString
+    pea     .newline(pc)
+    bsr     SerialPrintf
+    addq.l  #4,sp
 
-    bra.w   .entry_loop
+    bra     .entry_loop
 
 .done:
-    movem.l (sp)+,d0-d4/a0-a1
+    movem.l (sp)+,d0-d5/a0-a2
     rts
+
+.header:
+    dc.b    "Memory Map:",10,13,0
+.entry_fmt:
+    dc.b    "  $%.lx-$%.lx: %s ($%.lx KB)",0
+.dma_flag:
+    dc.b    " [DMA]",0
+.newline:
+    dc.b    10,13,0
+.type_reserved:
+    dc.b    "Reserved",0
+.type_free:
+    dc.b    "Free",0
+.type_rom:
+    dc.b    "ROM",0
+    even
 
 ; ============================================================
 ; Data
 ; ============================================================
 BannerMsg:
     dc.b    "AMAG ROM v0.1",10,13,0
-    even
-
-ChipRAMMsg:
-    dc.b    "Chip RAM: ",0
-    even
-
-SlowRAMMsg:
-    dc.b    "Slow RAM: ",0
-    even
-
-FastRAMMsg:
-    dc.b    "Fast RAM: ",0
-    even
-
-BytesMsg:
-    dc.b    " bytes",10,13,0
-    even
-
-MemMapHeaderMsg:
-    dc.b    "Memory Map:",10,13,0
-    even
-
-IndentMsg:
-    dc.b    "  ",0
-    even
-
-DashMsg:
-    dc.b    "-",0
-    even
-
-ColonSpaceMsg:
-    dc.b    ": ",0
-    even
-
-ReservedMsg:
-    dc.b    "Reserved ",0
-    even
-
-FreeMsg:
-    dc.b    "Free ",0
-    even
-
-ROMMsg:
-    dc.b    "ROM ",0
-    even
-
-OpenParenMsg:
-    dc.b    "(",0
-    even
-
-KBCloseMsg:
-    dc.b    "KB)",0
-    even
-
-DMAFlagMsg:
-    dc.b    " [DMA]",0
     even
 
 NewlineMsg:
