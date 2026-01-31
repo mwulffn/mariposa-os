@@ -63,6 +63,9 @@ Start:
 
     bsr     TestChipRAM         ; Test chip RAM (halts on yellow if fail)
 
+    bsr     DetectSlowRAM       ; Returns size in d0
+    move.l  d0,SLOW_RAM_VAR
+
     bsr     DetectFastRAM       ; Returns size in d0
     move.l  d0,FAST_RAM_VAR
 
@@ -81,6 +84,14 @@ Start:
     lea     ChipRAMMsg(pc),a0
     bsr     SerialPutString
     move.l  CHIP_RAM_VAR,d0
+    bsr     SerialPutHex
+    lea     BytesMsg(pc),a0
+    bsr     SerialPutString
+
+    ; Print detected slow RAM
+    lea     SlowRAMMsg(pc),a0
+    bsr     SerialPutString
+    move.l  SLOW_RAM_VAR,d0
     bsr     SerialPutHex
     lea     BytesMsg(pc),a0
     bsr     SerialPutString
@@ -323,6 +334,10 @@ BannerMsg:
 
 ChipRAMMsg:
     dc.b    "Chip RAM: ",0
+    even
+
+SlowRAMMsg:
+    dc.b    "Slow RAM: ",0
     even
 
 FastRAMMsg:

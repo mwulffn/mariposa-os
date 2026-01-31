@@ -122,14 +122,21 @@ SERDATR_RBF     equ 11              ; Receive buffer full
 ; ============================================================
 ; Memory layout
 ; ============================================================
+; Chip RAM - Custom chip accessible memory
 CHIP_RAM_START  equ $000000
-CHIP_RAM_END    equ $080000         ; 512KB
-CHIP_RAM_SIZE   equ $080000
+CHIP_RAM_MAX    equ $200000         ; 2MB max (ECS)
 
-FAST_RAM_START  equ $200000         ; A500 expansion
-FAST_RAM_END    equ $280000         ; +512KB typical
-FAST_RAM_SIZE   equ $080000
+; Slow RAM - Trapdoor expansion (A500/A500+)
+; Same speed as chip RAM but not DMA accessible
+SLOW_RAM_START  equ $C00000
+SLOW_RAM_MAX    equ $D80000         ; 1.8MB max, typically 512KB
 
+; Fast RAM - Zorro II expansion (edge connector)
+; Full CPU speed, no chip access
+FAST_RAM_START  equ $200000
+FAST_RAM_MAX    equ $A00000         ; 8MB max on Zorro II
+
+; ROM
 ROM_START       equ $FC0000
 ROM_END         equ $FFFFFF
 
@@ -139,7 +146,8 @@ ROM_END         equ $FFFFFF
 REG_DUMP_AREA   equ $000400         ; Register dump (80 bytes)
 HEX_BUFFER      equ $000450         ; Hex output buffer (12 bytes)
 CHIP_RAM_VAR    equ $000460         ; ChipRAMSize variable (4 bytes)
-FAST_RAM_VAR    equ $000464         ; FastRAMSize variable (4 bytes)
+SLOW_RAM_VAR    equ $000464         ; SlowRAMSize variable (4 bytes)
+FAST_RAM_VAR    equ $000468         ; FastRAMSize variable (4 bytes)
 DBG_STACK       equ $00084F         ; Debugger stack top
 DBG_CMD_BUF     equ $000850         ; Command buffer (128 bytes)
 COPPERLIST      equ $000950         ; Copper list (256 bytes)

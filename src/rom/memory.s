@@ -1,7 +1,10 @@
 ; ============================================================
-; memory.s - Memory detection and testing
+; memory.s - Comprehensive Amiga Memory Detection
 ; ============================================================
-; Provides functions for detecting and testing chip/fast RAM
+; Detects all standard Amiga memory regions:
+; - Chip RAM: $000000-$1FFFFF (up to 2MB on ECS)
+; - Slow RAM: $C00000-$D7FFFF (trapdoor expansion, up to 1.8MB)
+; - Fast RAM: $200000-$9FFFFF (Zorro II expansion, up to 8MB)
 ; ============================================================
 
 ; hardware.i already included by bootstrap.s
@@ -10,12 +13,15 @@
 ; DetectChipRAM - Detect chip RAM size
 ; Returns: d0.l = chip RAM size in bytes
 ; ============================================================
+; Tests at specific boundaries: 2MB, 1MB, 512KB
+; Uses mirroring detection to avoid false positives
+; ============================================================
 DetectChipRAM:
     movem.l d1-d2/a0,-(sp)
+    move.l  #$AA55AA55,d1       ; Test pattern
 
-    ; Test for 2MB (write to $1FFFF0)
+    ; Test for 2MB (ECS max)
     lea     $1FFFF0,a0
-    move.l  #$AA55AA55,d1
     move.l  (a0),d2             ; Save original
     move.l  d1,(a0)
     cmp.l   (a0),d1
@@ -25,18 +31,108 @@ DetectChipRAM:
     bra.s   .done
 
 .try_1mb:
-    ; Test for 1MB (write to $FFFF0)
+    ; Test for 1MB
     lea     $FFFF0,a0
-    move.l  (a0),d2             ; Save original
+    move.l  (a0),d2
     move.l  d1,(a0)
     cmp.l   (a0),d1
     bne.s   .default_512k
-    move.l  d2,(a0)             ; Restore
+    move.l  d2,(a0)
     move.l  #$100000,d0         ; 1MB
     bra.s   .done
 
 .default_512k:
-    move.l  #$080000,d0         ; 512KB
+    move.l  #$080000,d0         ; 512KB (minimum for Amiga)
+
+.done:
+    movem.l (sp)+,d1-d2/a0
+    rts
+
+; ============================================================
+; DetectSlowRAM - Detect slow RAM (trapdoor expansion)
+; Returns: d0.l = slow RAM size in bytes (0 if none)
+; ============================================================
+; Slow RAM starts at $C00000, typically 512KB on A500
+; Maximum is 1.8MB but most expansions are 512KB
+; ============================================================
+DetectSlowRAM:
+    movem.l d1-d2/a0,-(sp)
+
+    ; Probe $C00000 for presence
+    lea     SLOW_RAM_START,a0
+    move.l  #$AA55AA55,d1
+    move.l  (a0),d2             ; Save original
+    move.l  d1,(a0)
+    cmp.l   (a0),d1
+    bne.s   .no_slow
+    move.l  d2,(a0)             ; Restore
+
+    ; Slow RAM detected, now size it
+    ; Test 512KB boundaries up to 1.8MB
+    move.l  #$080000,d0         ; Start with 512KB
+
+.size_loop:
+    cmp.l   #$180000,d0         ; Max 1.8MB
+    bge.s   .done
+
+    lea     SLOW_RAM_START,a0
+    add.l   d0,a0
+    move.l  (a0),d2
+    move.l  d1,(a0)
+    cmp.l   (a0),d1
+    bne.s   .done
+    move.l  d2,(a0)
+
+    add.l   #$080000,d0         ; Next 512KB
+    bra.s   .size_loop
+
+.no_slow:
+    moveq   #0,d0
+
+.done:
+    movem.l (sp)+,d1-d2/a0
+    rts
+
+; ============================================================
+; DetectFastRAM - Detect fast RAM (Zorro II expansion)
+; Returns: d0.l = fast RAM size in bytes (0 if none)
+; ============================================================
+; Fast RAM starts at $200000 (edge connector expansion)
+; Maximum is 8MB on Zorro II bus
+; ============================================================
+DetectFastRAM:
+    movem.l d1-d2/a0,-(sp)
+
+    ; Probe $200000 for presence
+    lea     FAST_RAM_START,a0
+    move.l  #$AA55AA55,d1
+    move.l  (a0),d2             ; Save original
+    move.l  d1,(a0)
+    cmp.l   (a0),d1
+    bne.s   .no_fast
+    move.l  d2,(a0)             ; Restore
+
+    ; Fast RAM detected, now size it
+    ; Test 512KB boundaries up to 8MB
+    move.l  #$080000,d0         ; Start with 512KB
+
+.size_loop:
+    cmp.l   #$800000,d0         ; Max 8MB
+    bge.s   .done
+
+    lea     FAST_RAM_START,a0
+    add.l   d0,a0
+    move.l  (a0),d2
+    move.l  d1,(a0)
+    cmp.l   (a0),d1
+    bne.s   .done
+    move.l  d2,(a0)
+
+    add.l   #$080000,d0         ; Next 512KB
+    bra.s   .size_loop
+
+.no_fast:
+    moveq   #0,d0
 
 .done:
     movem.l (sp)+,d1-d2/a0
@@ -87,59 +183,23 @@ TestChipRAM:
     bra.s   .halt
 
 ; ============================================================
-; DetectFastRAM - Detect fast RAM size
-; Returns: d0.l = fast RAM size in bytes (0 if none)
+; BuildMemoryMap - Create comprehensive memory map table
 ; ============================================================
-DetectFastRAM:
-    movem.l d1-d2/a0,-(sp)
-
-    ; Probe $200000 for presence
-    lea     $200000,a0
-    move.l  #$AA55AA55,d1
-    move.l  (a0),d2             ; Save original (if any)
-    move.l  d1,(a0)
-    cmp.l   (a0),d1
-    bne.s   .no_fast
-    move.l  d2,(a0)             ; Restore
-
-    ; Fast RAM detected, now size it
-    ; Test 512KB boundaries up to 8MB
-    move.l  #$080000,d0         ; Start with 512KB
-
-.size_loop:
-    cmp.l   #$800000,d0         ; Max 8MB
-    bge.s   .done
-
-    lea     $200000,a0
-    add.l   d0,a0
-    move.l  (a0),d2
-    move.l  d1,(a0)
-    cmp.l   (a0),d1
-    bne.s   .done
-    move.l  d2,(a0)
-
-    add.l   #$080000,d0         ; Next 512KB
-    bra.s   .size_loop
-
-.no_fast:
-    moveq   #0,d0
-
-.done:
-    movem.l (sp)+,d1-d2/a0
-    rts
-
-; ============================================================
-; BuildMemoryMap - Create memory map table
+; Memory map format (12 bytes per entry):
+;   +0: Base address (long)
+;   +4: Size in bytes (long)
+;   +8: Type (word) - 0=Reserved, 1=Free, 2=ROM
+;  +10: Flags (word) - bit 0: DMA capable
 ; ============================================================
 BuildMemoryMap:
     movem.l d0-d1/a0,-(sp)
     lea     MEMMAP_TABLE,a0
 
-    ; Entry 1: Reserved area ($000-$3FFF)
+    ; Entry 1: Reserved low chip RAM ($000-$3FFF)
     move.l  #$00000000,(a0)+    ; Base
-    move.l  #$00004000,(a0)+    ; Size
+    move.l  #KERNEL_CHIP,(a0)+  ; Size
     move.w  #MEM_TYPE_RESERVED,(a0)+ ; Type
-    move.w  #$0000,(a0)+        ; Flags
+    move.w  #$0001,(a0)+        ; Flags: DMA capable
 
     ; Entry 2: Free chip RAM ($4000 to detected size)
     move.l  #KERNEL_CHIP,(a0)+  ; Base
@@ -147,28 +207,38 @@ BuildMemoryMap:
     sub.l   #KERNEL_CHIP,d0
     move.l  d0,(a0)+            ; Size
     move.w  #MEM_TYPE_FREE,(a0)+ ; Type
-    move.w  #$0000,(a0)+        ; Flags
+    move.w  #$0001,(a0)+        ; Flags: DMA capable
 
-    ; Entry 3: Fast RAM (if any)
+    ; Entry 3: Slow RAM (if any)
+    move.l  SLOW_RAM_VAR,d1
+    tst.l   d1
+    beq.s   .no_slow
+    move.l  #SLOW_RAM_START,(a0)+ ; Base
+    move.l  d1,(a0)+            ; Size
+    move.w  #MEM_TYPE_FREE,(a0)+ ; Type
+    move.w  #$0000,(a0)+        ; Flags: Not DMA capable
+
+.no_slow:
+    ; Entry 4: Fast RAM (if any)
     move.l  FAST_RAM_VAR,d1
     tst.l   d1
     beq.s   .no_fast
     move.l  #FAST_RAM_START,(a0)+ ; Base
     move.l  d1,(a0)+            ; Size
     move.w  #MEM_TYPE_FREE,(a0)+ ; Type
-    move.w  #$0000,(a0)+        ; Flags
+    move.w  #$0000,(a0)+        ; Flags: Not DMA capable
 
 .no_fast:
-    ; Entry 4: ROM
+    ; Entry 5: ROM
     move.l  #ROM_START,(a0)+
     move.l  #$040000,(a0)+      ; 256KB
     move.w  #MEM_TYPE_ROM,(a0)+
     move.w  #$0000,(a0)+
 
-    ; Terminator
+    ; Terminate with null entry
     move.l  #$00000000,(a0)+
     move.l  #$00000000,(a0)+
-    move.w  #MEM_TYPE_END,(a0)+
+    move.w  #$0000,(a0)+
     move.w  #$0000,(a0)+
 
     movem.l (sp)+,d0-d1/a0
@@ -178,5 +248,5 @@ BuildMemoryMap:
 ; Data
 ; ============================================================
 MemTestFailMsg:
-    dc.b    "CHIP RAM TEST FAILED - YELLOW SCREEN",10,13,0
+    dc.b    "CHIP RAM TEST FAILED",10,13,0
     even

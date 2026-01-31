@@ -23,11 +23,11 @@ $(ROM): $(SRCS) $(INCS) | $(BUILDDIR)
 	@echo "ROM size: $$(wc -c < $@) bytes"
 
 run: $(ROM)
-	open -a "FS-UAE" --args "$(PWD)/a500.fs-uae"
-
-# Alternative: invoke the binary directly if 'open' doesn't pass args correctly
-run-direct: $(ROM)
 	/Applications/FS-UAE.app/Contents/MacOS/fs-uae "$(PWD)/a500.fs-uae"
+
+# Alternative: use macOS open command (doesn't pass args reliably)
+run-open: $(ROM)
+	open -a "FS-UAE" --args "$(PWD)/a500.fs-uae"
 
 clean:
 	rm -rf $(BUILDDIR)

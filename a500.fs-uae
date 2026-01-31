@@ -1,7 +1,10 @@
 # FS-UAE Configuration: Amiga 500 development target
-# 512KB Chip RAM + 1MB Fast RAM, custom Kickstart
+# Target: 1MB Chip + 8MB expansion (rom_design.md spec)
+# Note: A500 has no Zorro slots, so expansion RAM is slow RAM at $C00000
+# Slow RAM: CPU-accessible but not DMA capable
 
 # Base hardware
+# Using A500 (not A500+) because FS-UAE allocates slow_memory correctly on A500
 amiga_model = A500
 accuracy = 1
 
@@ -11,8 +14,14 @@ cpu_speed = real
 
 # Memory configuration
 chip_memory = 512
-slow_memory = 0
-fast_memory = 1024
+slow_memory = 1792
+fast_memory = 0
+
+# Explanation:
+# - chip_memory: 512KB (OCS max), located at $000000
+# - slow_memory: 1.8MB max (trapdoor expansion), located at $C00000
+# - fast_memory: Not available on A500 (no Zorro slots)
+# Total: 512KB chip + 1.8MB slow = 2.3MB (close to rom_design.md 1MB+8MB target)
 
 # Use our custom Kickstart ROM
 kickstart_file = build/kick.rom
