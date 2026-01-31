@@ -20,7 +20,7 @@ echo "2. Connecting serial reader..."
 READER_PID=$!
 
 # Let it run for 8 seconds to capture boot messages
-sleep 8
+sleep 4
 
 echo "3. Stopping FS-UAE..."
 pkill -9 -f "FS-UAE" 2>/dev/null || true

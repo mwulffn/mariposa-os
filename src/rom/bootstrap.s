@@ -80,6 +80,9 @@ Start:
     lea     BannerMsg(pc),a0
     bsr     SerialPutString
 
+    ; Print memory map table
+    bsr     PrintMemoryMap
+
     ; Print detected chip RAM
     lea     ChipRAMMsg(pc),a0
     bsr     SerialPutString
@@ -326,6 +329,169 @@ SerialPutHex:
     rts
 
 ; ============================================================
+; PrintMemoryMap - Output memory map table to serial port
+; ============================================================
+; Reads the memory map table and formats each entry for display
+; Entry format: 12 bytes (base, size, type, flags)
+; ============================================================
+PrintMemoryMap:
+    movem.l d0-d4/a0-a1,-(sp)
+
+    ; Print header
+    lea     MemMapHeaderMsg(pc),a0
+    bsr     SerialPutString
+
+    ; Start at beginning of memory map table
+    lea     MEMMAP_TABLE,a1
+
+.entry_loop:
+    ; Read base address
+    move.l  (a1)+,d0
+    ; Read size
+    move.l  (a1)+,d1
+    ; Read type (word)
+    move.w  (a1)+,d2
+    ; Read flags (word) and mask to clear upper word
+    moveq   #0,d3
+    move.w  (a1)+,d3
+
+    ; Check for end of table (base=0, size=0)
+    tst.l   d0
+    bne.w   .print_entry
+    tst.l   d1
+    beq.w   .done
+
+.print_entry:
+    ; Print "  "
+    lea     IndentMsg(pc),a0
+    bsr     SerialPutString
+
+    ; Print base address
+    move.l  d0,-(sp)
+    bsr     SerialPutHex
+    move.l  (sp)+,d0
+
+    ; Print "-"
+    lea     DashMsg(pc),a0
+    bsr     SerialPutString
+
+    ; Calculate and print end address (base + size - 1)
+    ; Use d4 temporarily, don't overwrite d3 (flags!)
+    move.l  d0,d4
+    add.l   d1,d4
+    subq.l  #1,d4
+    move.l  d4,d0
+    bsr     SerialPutHex
+
+    ; Print ": "
+    lea     ColonSpaceMsg(pc),a0
+    bsr     SerialPutString
+
+    ; Print type name
+    cmp.w   #MEM_TYPE_RESERVED,d2
+    beq.w   .print_reserved
+    cmp.w   #MEM_TYPE_FREE,d2
+    beq.w   .print_free
+    cmp.w   #MEM_TYPE_ROM,d2
+    beq.w   .print_rom
+    bra.w   .print_size
+
+.print_reserved:
+    lea     ReservedMsg(pc),a0
+    bsr     SerialPutString
+    bra.w   .print_size
+
+.print_free:
+    lea     FreeMsg(pc),a0
+    bsr     SerialPutString
+    bra.w   .print_size
+
+.print_rom:
+    lea     ROMMsg(pc),a0
+    bsr     SerialPutString
+
+.print_size:
+    ; Print size in KB
+    lea     OpenParenMsg(pc),a0
+    bsr     SerialPutString
+
+    ; Convert bytes to KB (divide by 1024)
+    move.l  d1,d0
+    lsr.l   #8,d0           ; /256
+    lsr.l   #2,d0           ; /4 more = /1024 total
+    bsr     SerialPutHex    ; Use hex for simplicity
+
+    lea     KBCloseMsg(pc),a0
+    bsr     SerialPutString
+
+    ; Print flags if DMA capable
+    btst    #0,d3
+    beq.s   .no_dma
+    lea     DMAFlagMsg(pc),a0
+    bsr     SerialPutString
+
+.no_dma:
+    ; Print newline
+    lea     NewlineMsg(pc),a0
+    bsr     SerialPutString
+
+    bra.w   .entry_loop
+
+.done:
+    movem.l (sp)+,d0-d4/a0-a1
+    rts
+
+; ============================================================
+; SerialPutDecimal - Print decimal number
+; Input: d0.l = number to print
+; ============================================================
+SerialPutDecimal:
+    movem.l d0-d2/a0-a2,-(sp)
+
+    lea     DEC_BUFFER,a0
+    move.l  a0,a1           ; Save start position
+
+    ; Handle zero special case
+    tst.l   d0
+    bne.s   .convert
+    move.b  #'0',(a0)+
+    bra.s   .terminate
+
+.convert:
+    ; Convert to decimal (store digits in reverse)
+    move.l  a0,a1           ; Mark start
+.digit_loop:
+    move.l  d0,d1
+    divu    #10,d1          ; d1 = d0 / 10
+    swap    d1              ; Remainder in low word
+    add.b   #'0',d1         ; Convert to ASCII
+    move.b  d1,(a0)+        ; Store digit
+    clr.w   d1
+    swap    d1
+    move.l  d1,d0           ; Quotient becomes new dividend
+    tst.l   d0
+    bne.s   .digit_loop
+
+    ; Reverse the string
+    move.l  a0,a2           ; End position
+    subq.l  #1,a2
+.reverse_loop:
+    cmp.l   a1,a2
+    ble.s   .terminate
+    move.b  (a1),d1
+    move.b  (a2),(a1)+
+    move.b  d1,(a2)-
+    bra.s   .reverse_loop
+
+.terminate:
+    clr.b   (a0)            ; Null terminate
+    move.l  a1,a0
+    bsr     SerialPutString
+
+    movem.l (sp)+,d0-d2/a0-a2
+    rts
+
+; ============================================================
 ; Data
 ; ============================================================
 BannerMsg:
@@ -346,6 +512,50 @@ FastRAMMsg:
 
 BytesMsg:
     dc.b    " bytes",10,13,0
+    even
+
+MemMapHeaderMsg:
+    dc.b    "Memory Map:",10,13,0
+    even
+
+IndentMsg:
+    dc.b    "  ",0
+    even
+
+DashMsg:
+    dc.b    "-",0
+    even
+
+ColonSpaceMsg:
+    dc.b    ": ",0
+    even
+
+ReservedMsg:
+    dc.b    "Reserved ",0
+    even
+
+FreeMsg:
+    dc.b    "Free ",0
+    even
+
+ROMMsg:
+    dc.b    "ROM ",0
+    even
+
+OpenParenMsg:
+    dc.b    "(",0
+    even
+
+KBCloseMsg:
+    dc.b    "KB)",0
+    even
+
+DMAFlagMsg:
+    dc.b    " [DMA]",0
+    even
+
+NewlineMsg:
+    dc.b    10,13,0
     even
 
 SuccessMsg:

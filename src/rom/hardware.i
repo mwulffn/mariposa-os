@@ -145,6 +145,7 @@ ROM_END         equ $FFFFFF
 ; ============================================================
 REG_DUMP_AREA   equ $000400         ; Register dump (80 bytes)
 HEX_BUFFER      equ $000450         ; Hex output buffer (12 bytes)
+DEC_BUFFER      equ $00045C         ; Decimal output buffer (12 bytes)
 CHIP_RAM_VAR    equ $000460         ; ChipRAMSize variable (4 bytes)
 SLOW_RAM_VAR    equ $000464         ; SlowRAMSize variable (4 bytes)
 FAST_RAM_VAR    equ $000468         ; FastRAMSize variable (4 bytes)
