@@ -136,6 +136,14 @@ SLOW_RAM_MAX    equ $D80000         ; 1.8MB max, typically 512KB
 FAST_RAM_START  equ $200000
 FAST_RAM_MAX    equ $A00000         ; 8MB max on Zorro II
 
+; Zorro II Autoconfig
+ZORRO_BASE      equ $E80000
+ZORRO_TYPE      equ $E80000         ; er_Type
+ZORRO_FLAGS     equ $E80004         ; er_Flags
+ZORRO_BASEHI    equ $E80048         ; ec_BaseAddress high byte
+ZORRO_BASELO    equ $E8004A         ; ec_BaseAddress low byte
+ZORRO_SHUTUP    equ $E8004C         ; ec_Shutup
+
 ; ROM
 ROM_START       equ $FC0000
 ROM_END         equ $FFFFFF

@@ -17,35 +17,67 @@
 ; Uses mirroring detection to avoid false positives
 ; ============================================================
 DetectChipRAM:
-    movem.l d1-d2/a0,-(sp)
-    move.l  #$AA55AA55,d1       ; Test pattern
+    movem.l d1-d3/a0-a1,-(sp)
 
     ; Test for 2MB (ECS max)
-    lea     $1FFFF0,a0
-    move.l  (a0),d2             ; Save original
-    move.l  d1,(a0)
-    cmp.l   (a0),d1
-    bne.s   .try_1mb
-    move.l  d2,(a0)             ; Restore
+    ; Check if $1FFFF0 is separate from $FFFF0
+    lea     $FFFF0,a1           ; Base (1MB boundary)
+    lea     $1FFFF0,a0          ; Test (2MB boundary)
+
+    ; Save originals
+    move.l  (a1),d3             ; Save base
+    move.l  (a0),d2             ; Save test
+
+    ; Two-pattern test
+    move.l  #$AA55AA55,(a1)     ; Pattern A at base
+    move.l  #$55AA55AA,(a0)     ; Pattern B at test
+
+    ; Check if base survived
+    cmp.l   #$AA55AA55,(a1)
+    bne.s   .mirrored_2mb
+
+    ; Separate RAM - restore and return 2MB
+    move.l  d3,(a1)
+    move.l  d2,(a0)
     move.l  #$200000,d0         ; 2MB
     bra.s   .done
 
-.try_1mb:
+.mirrored_2mb:
+    ; Restore originals
+    move.l  d3,(a1)
+    move.l  d2,(a0)
+
     ; Test for 1MB
-    lea     $FFFF0,a0
+    ; Check if $FFFF0 is separate from $7FFF0
+    lea     $7FFF0,a1           ; Base (512KB boundary)
+    lea     $FFFF0,a0           ; Test (1MB boundary)
+
+    ; Save originals
+    move.l  (a1),d3
     move.l  (a0),d2
-    move.l  d1,(a0)
-    cmp.l   (a0),d1
-    bne.s   .default_512k
+
+    ; Two-pattern test
+    move.l  #$AA55AA55,(a1)     ; Pattern A at base
+    move.l  #$55AA55AA,(a0)     ; Pattern B at test
+
+    ; Check if base survived
+    cmp.l   #$AA55AA55,(a1)
+    bne.s   .mirrored_1mb
+
+    ; Separate RAM - restore and return 1MB
+    move.l  d3,(a1)
     move.l  d2,(a0)
     move.l  #$100000,d0         ; 1MB
     bra.s   .done
 
-.default_512k:
+.mirrored_1mb:
+    ; Restore originals
+    move.l  d3,(a1)
+    move.l  d2,(a0)
     move.l  #$080000,d0         ; 512KB (minimum for Amiga)
 
 .done:
-    movem.l (sp)+,d1-d2/a0
+    movem.l (sp)+,d1-d3/a0-a1
     rts
 
 ; ============================================================
@@ -98,40 +130,26 @@ DetectSlowRAM:
 ; Returns: d0.l = fast RAM size in bytes (0 if none)
 ; Side effect: Stores base address in FAST_RAM_BASE
 ; ============================================================
-; Checks multiple locations:
-; - $200000: Zorro II space (A500 edge connector, A2000/3000/4000)
-; - $1000000: High memory (FS-UAE with A500+, Zorro III)
+; Probes $200000 for Zorro II RAM (must call ConfigureZorroII first!)
 ; ============================================================
 DetectFastRAM:
     movem.l d1-d3/a0,-(sp)
     move.l  #$AA55AA55,d1
 
-    ; Try Zorro II space first ($200000)
+    ; Probe Zorro II space ($200000)
     lea     $200000,a0
-    move.l  (a0),d2
-    move.l  d1,(a0)
-    cmp.l   (a0),d1
-    bne.s   .try_high_mem
-    move.l  d2,(a0)
-    move.l  #$200000,d3         ; Base address
-    bra.s   .size_it
-
-.try_high_mem:
-    ; Try high memory space ($1000000)
-    lea     $1000000,a0
     move.l  (a0),d2
     move.l  d1,(a0)
     cmp.l   (a0),d1
     bne.s   .no_fast
     move.l  d2,(a0)
-    move.l  #$1000000,d3        ; Base address
+    move.l  #$200000,d3         ; Base address
 
-.size_it:
     ; Store base address
     move.l  d3,FAST_RAM_BASE
 
     ; Size the fast RAM in 1MB increments (faster for large blocks)
-    move.l  #$1000,d0         ; Start with 1MB
+    move.l  #$100000,d0         ; Start with 1MB
 
 .size_loop:
     cmp.l   #$A00000,d0         ; Max 10MB (to be safe)
@@ -145,7 +163,7 @@ DetectFastRAM:
     bne.s   .done
     move.l  d2,(a0)
 
-    add.l   #$1000,d0         ; Next 1MB
+    add.l   #$100000,d0         ; Next 1MB
     bra.s   .size_loop
 
 .no_fast:
@@ -241,7 +259,7 @@ BuildMemoryMap:
     move.l  FAST_RAM_VAR,d1
     tst.l   d1
     beq.s   .no_fast
-    move.l  FAST_RAM_BASE,(a0)+ ; Base (could be $200000 or $1000000)
+    move.l  FAST_RAM_BASE,(a0)+ ; Base ($200000 after autoconfig)
     move.l  d1,(a0)+            ; Size
     move.w  #MEM_TYPE_FREE,(a0)+ ; Type
     move.w  #$0000,(a0)+        ; Flags: Not DMA capable

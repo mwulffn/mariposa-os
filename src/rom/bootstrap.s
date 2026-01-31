@@ -66,6 +66,8 @@ Start:
     bsr     DetectSlowRAM       ; Returns size in d0
     move.l  d0,SLOW_RAM_VAR
 
+    ; A500 has Zorro I with AutoConfig
+    bsr     ConfigureZorroII    ; Configure expansion cards
     bsr     DetectFastRAM       ; Returns size in d0
     move.l  d0,FAST_RAM_VAR
 
@@ -618,9 +620,10 @@ GenericExcMsg:
     even
 
 ; ============================================================
-; Include debug, memory, serial, and debugger modules
+; Include debug, autoconfig, memory, serial, and debugger modules
 ; ============================================================
     include "debug.s"
+    include "autoconfig.s"
     include "memory.s"
     include "serial.s"
     include "debugger.s"

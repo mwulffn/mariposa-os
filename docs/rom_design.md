@@ -22,13 +22,18 @@
    - Initialize chip registers
    - Set up exception vectors
 
-2. **Memory Detection**
+2. **Zorro II Autoconfig**
+   - Probe $E80000 for expansion cards
+   - Configure and relocate memory boards to $200000+
+   - Configure I/O boards as needed
+
+3. **Memory Detection**
    - Detect chip RAM size (512KB, 1MB, 2MB)
    - Detect fast RAM (location and size)
    - Quick power-on test
    - Support multiple Amiga configurations
 
-3. **Interactive Debugger**
+4. **Interactive Debugger**
    - Serial I/O (directly banged, 9600 baud default)
    - Keyboard I/O via CIA-A
    - Register display/modification
@@ -38,14 +43,14 @@
    - Disassembly
    - Console with built-in 8x8 font
 
-4. **Boot Loader**
+5. **Boot Loader**
    - IDE driver (read-only sufficient)
    - FAT16 filesystem (read-only)
    - Load SYSTEM.BIN from disk
    - Relocate kernel to fast RAM
    - Transfer control to kernel
 
-5. **Exception Handlers**
+6. **Exception Handlers**
    - Bus error
    - Address error
    - Illegal instruction
@@ -54,7 +59,7 @@
    - Privilege violation
    - All handlers → debugger with context
 
-6. **ROM Services**
+7. **ROM Services**
    - Panic: dump registers, enter debugger
    - SerPutc/SerPuts: serial output
    - ConPrint: console output
@@ -101,6 +106,7 @@ On any exception:
    - Point all vectors to ROM handlers
    
 3. Memory detection
+   - Run Zorro II autoconfig (relocate expansion cards)
    - Size chip RAM (512KB, 1MB, 2MB) with mirror detection
    - Size fast RAM at $200000
    - Quick test (optional, skippable)
@@ -152,6 +158,78 @@ Offset 8:      Magic number ($414D4147 = 'AMAG')
 Offset 12:     ROM version (word)
 Offset 14:     ROM flags (word)
 ```
+
+## Zorro II Autoconfig
+
+Expansion cards (including RAM) must be configured before they appear at their final addresses. Cards initially respond at $E80000 and are relocated by ROM.
+
+**Autoconfig space:** $E80000 - $E8007F
+
+**Registers (active low nibbles, read high nibble of each word):**
+
+| Offset | Name | Description |
+|--------|------|-------------|
+| $00 | er_Type | Board type and size |
+| $02 | er_Product | Product number |
+| $04 | er_Flags | Configuration flags |
+| $08-$0E | er_Manufacturer | 16-bit manufacturer ID |
+| $10-$16 | er_SerialNumber | 32-bit serial |
+| $40 | ec_Interrupt | Interrupt config (active low) |
+| $48 | ec_BaseAddress | Write high byte of base address |
+| $4A | ec_BaseAddress | Write low byte (triggers relocation) |
+| $4C | ec_Shutup | Write to disable card |
+
+**er_Type ($00) bits:**
+
+| Bits | Meaning |
+|------|---------|
+| 7-6 | Type: 11=board with size field, 10=board no size |
+| 5 | Chained (more boards follow) |
+| 4 | ROM vector present |
+| 3-0 | Size code |
+
+**Size codes (bits 3-0):**
+
+| Code | Size |
+|------|------|
+| 0000 | 8 MB |
+| 0001 | 64 KB |
+| 0010 | 128 KB |
+| 0011 | 256 KB |
+| 0100 | 512 KB |
+| 0101 | 1 MB |
+| 0110 | 2 MB |
+| 0111 | 4 MB |
+
+**er_Flags ($04) bits:**
+
+| Bits | Meaning |
+|------|---------|
+| 7 | Memory board (1=memory, 0=I/O) |
+| 6 | Boot ROM present |
+| 5 | Can't be shutup |
+| 4 | Reserved |
+| 3-0 | Reserved |
+
+**Autoconfig algorithm:**
+
+```
+1. Check er_Type at $E80000
+2. If $FF or $00 → no more cards, done
+3. Read size from er_Type bits 3-0
+4. Allocate base address (start at $200000 for RAM)
+5. Write base address high byte to $E80048
+6. Write base address low byte to $E8004A (triggers relocation)
+7. Card is now at new address
+8. Increment base address by card size
+9. Go to step 1 (next card appears at $E80000)
+```
+
+**Notes:**
+- Autoconfig nibbles are active-low (inverted)
+- Read high nibble: `move.b (a0),d0; lsr.b #4,d0; eor.b #$F,d0`
+- Memory boards (er_Flags bit 7) should be assigned $200000+
+- I/O boards typically get $E90000+
 
 ## IDE Interface
 
