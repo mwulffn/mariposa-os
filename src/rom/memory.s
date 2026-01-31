@@ -94,33 +94,50 @@ DetectSlowRAM:
     rts
 
 ; ============================================================
-; DetectFastRAM - Detect fast RAM (Zorro II expansion)
+; DetectFastRAM - Detect fast RAM (Zorro expansion)
 ; Returns: d0.l = fast RAM size in bytes (0 if none)
+; Side effect: Stores base address in FAST_RAM_BASE
 ; ============================================================
-; Fast RAM starts at $200000 (edge connector expansion)
-; Maximum is 8MB on Zorro II bus
+; Checks multiple locations:
+; - $200000: Zorro II space (A500 edge connector, A2000/3000/4000)
+; - $1000000: High memory (FS-UAE with A500+, Zorro III)
 ; ============================================================
 DetectFastRAM:
-    movem.l d1-d2/a0,-(sp)
-
-    ; Probe $200000 for presence
-    lea     FAST_RAM_START,a0
+    movem.l d1-d3/a0,-(sp)
     move.l  #$AA55AA55,d1
-    move.l  (a0),d2             ; Save original
+
+    ; Try Zorro II space first ($200000)
+    lea     $200000,a0
+    move.l  (a0),d2
+    move.l  d1,(a0)
+    cmp.l   (a0),d1
+    bne.s   .try_high_mem
+    move.l  d2,(a0)
+    move.l  #$200000,d3         ; Base address
+    bra.s   .size_it
+
+.try_high_mem:
+    ; Try high memory space ($1000000)
+    lea     $1000000,a0
+    move.l  (a0),d2
     move.l  d1,(a0)
     cmp.l   (a0),d1
     bne.s   .no_fast
-    move.l  d2,(a0)             ; Restore
+    move.l  d2,(a0)
+    move.l  #$1000000,d3        ; Base address
 
-    ; Fast RAM detected, now size it
-    ; Test 512KB boundaries up to 8MB
-    move.l  #$080000,d0         ; Start with 512KB
+.size_it:
+    ; Store base address
+    move.l  d3,FAST_RAM_BASE
+
+    ; Size the fast RAM in 1MB increments (faster for large blocks)
+    move.l  #$1000,d0         ; Start with 1MB
 
 .size_loop:
-    cmp.l   #$800000,d0         ; Max 8MB
+    cmp.l   #$A00000,d0         ; Max 10MB (to be safe)
     bge.s   .done
 
-    lea     FAST_RAM_START,a0
+    move.l  d3,a0
     add.l   d0,a0
     move.l  (a0),d2
     move.l  d1,(a0)
@@ -128,14 +145,15 @@ DetectFastRAM:
     bne.s   .done
     move.l  d2,(a0)
 
-    add.l   #$080000,d0         ; Next 512KB
+    add.l   #$1000,d0         ; Next 1MB
     bra.s   .size_loop
 
 .no_fast:
+    clr.l   FAST_RAM_BASE
     moveq   #0,d0
 
 .done:
-    movem.l (sp)+,d1-d2/a0
+    movem.l (sp)+,d1-d3/a0
     rts
 
 ; ============================================================
@@ -223,7 +241,7 @@ BuildMemoryMap:
     move.l  FAST_RAM_VAR,d1
     tst.l   d1
     beq.s   .no_fast
-    move.l  #FAST_RAM_START,(a0)+ ; Base
+    move.l  FAST_RAM_BASE,(a0)+ ; Base (could be $200000 or $1000000)
     move.l  d1,(a0)+            ; Size
     move.w  #MEM_TYPE_FREE,(a0)+ ; Type
     move.w  #$0000,(a0)+        ; Flags: Not DMA capable

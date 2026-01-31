@@ -148,6 +148,7 @@ HEX_BUFFER      equ $000450         ; Hex output buffer (12 bytes)
 CHIP_RAM_VAR    equ $000460         ; ChipRAMSize variable (4 bytes)
 SLOW_RAM_VAR    equ $000464         ; SlowRAMSize variable (4 bytes)
 FAST_RAM_VAR    equ $000468         ; FastRAMSize variable (4 bytes)
+FAST_RAM_BASE   equ $00046C         ; FastRAMBase address (4 bytes)
 DBG_STACK       equ $00084F         ; Debugger stack top
 DBG_CMD_BUF     equ $000850         ; Command buffer (128 bytes)
 COPPERLIST      equ $000950         ; Copper list (256 bytes)
