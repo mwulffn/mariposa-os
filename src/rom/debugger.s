@@ -5,7 +5,7 @@
 ;   r              - Display all registers
 ;   r <reg> <hex>  - Set register (D0-D7, A0-A7, PC, SR)
 ;   m <addr>       - Memory dump (16 bytes)
-;   m <addr> <hex> - Memory write (byte)
+;   m <addr> <hex> - Memory write (auto-sizes: 1-2=byte, 3-4=word, 5-8=long)
 ;   g              - Continue execution
 ;   g <addr>       - Continue from address
 ;   ?              - Help
@@ -209,9 +209,9 @@ SkipWhitespace:
 ; ParseHex - Parse hex string to D0.l
 ; ============================================================
 ; A0 = string pointer (advanced past hex digits)
-; Returns D0.l = parsed value, Z flag set if no digits found
+; Returns D0.l = parsed value, D1.w = digit count, Z flag set if no digits found
 ParseHex:
-    movem.l d1-d3,-(sp)
+    movem.l d2-d3,-(sp)             ; Don't save D1 - used for return value
 
     moveq   #0,d0                       ; Result
     moveq   #0,d3                       ; Digit count
@@ -259,10 +259,11 @@ ParseHex:
     bra.s   .parse_loop
 
 .done:
+    move.w  d3,d1                   ; Return digit count in D1
     ; Set Z flag based on digit count
     tst.w   d3
 
-    movem.l (sp)+,d1-d3
+    movem.l (sp)+,d2-d3
     rts
 
 ; ============================================================
@@ -424,9 +425,27 @@ CmdMemory:
     bsr     ParseHex
     beq.s   .bad_value
 
-    ; Write byte
+    ; Write based on digit count (D1 from ParseHex)
+    cmp.w   #2,d1
+    ble.s   .write_byte
+    cmp.w   #4,d1
+    ble.s   .write_word
+
+    ; 5-8 digits: longword
+    move.l  d0,(a1)
+    lea     .ok_long_msg(pc),a0
+    bra.s   .write_ok
+
+.write_word:
+    move.w  d0,(a1)
+    lea     .ok_word_msg(pc),a0
+    bra.s   .write_ok
+
+.write_byte:
     move.b  d0,(a1)
-    lea     .ok_msg(pc),a0
+    lea     .ok_byte_msg(pc),a0
+
+.write_ok:
     bsr     SerialPutString
     bra.s   .done
 
@@ -464,8 +483,12 @@ CmdMemory:
     movem.l (sp)+,d0-d4/a0-a1
     rts
 
-.ok_msg:
-    dc.b    "OK",0
+.ok_byte_msg:
+    dc.b    "OK (byte)",13,10,0
+.ok_word_msg:
+    dc.b    "OK (word)",13,10,0
+.ok_long_msg:
+    dc.b    "OK (long)",13,10,0
 .colon:
     dc.b    ": ",0
 .bad_addr_msg:
@@ -542,7 +565,7 @@ CmdHelp:
     dc.b    "  r              Display all registers",10,13
     dc.b    "  r <reg> <hex>  Set register (D0-D7,A0-A7,PC,SR)",10,13
     dc.b    "  m <addr>       Memory dump (16 bytes)",10,13
-    dc.b    "  m <addr> <hex> Memory write (byte)",10,13
+    dc.b    "  m <addr> <hex> Write memory (1-2=byte,3-4=word,5-8=long)",10,13
     dc.b    "  m              Dump next 16 bytes",10,13
     dc.b    "  g              Continue execution",10,13
     dc.b    "  g <addr>       Continue from address",10,13
