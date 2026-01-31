@@ -101,8 +101,8 @@ On any exception:
    - Point all vectors to ROM handlers
    
 3. Memory detection
-   - Size chip RAM
-   - Size fast RAM
+   - Size chip RAM (512KB, 1MB, 2MB) with mirror detection
+   - Size fast RAM at $200000
    - Quick test (optional, skippable)
    - Build memory map table at $3250
    
@@ -248,6 +248,7 @@ This is the only case where ROM halts without debugger.
 3. **Fail safe** — Any error → debugger, never silent hang
 4. **Trust nothing on crash** — Dedicated stack, fixed memory locations
 5. **Keep it simple** — IDE not SCSI, FAT16 not FFS, polling not interrupts (for ROM)
+6. **68000 has 24-bit address bus** — Maximum address is $FFFFFF. Do not probe above this.
 
 ## Memory Map Handoff
 
@@ -269,9 +270,7 @@ Offset  Size  Field
 |-------|------|
 | 0 | End of list (terminator) |
 | 1 | Chip RAM |
-| 2 | Fast RAM (Zorro II, $200000-$9FFFFF) |
-| 3 | Fast RAM (Zorro III / 32-bit) |
-| 4 | Slow RAM ($C00000-$C7FFFF, "Ranger") |
+| 2 | Fast RAM ($200000+) |
 | 5 | ROM |
 | 6 | Reserved / system |
 
@@ -293,7 +292,7 @@ $0325A    $0003       ; flags: tested + DMA capable
 
 $0325C    $00200000   ; base: fast RAM at $200000
 $03260    $00800000   ; size: 8MB
-$03264    $0002       ; type: Zorro II fast
+$03264    $0002       ; type: fast RAM
 $03266    $0001       ; flags: tested
 
 $03268    $00000000   ; base: 0 = end of list
