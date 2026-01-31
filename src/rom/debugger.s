@@ -4,7 +4,9 @@
 ; Commands:
 ;   r              - Display all registers
 ;   r <reg> <hex>  - Set register (D0-D7, A0-A7, PC, SR)
-;   m <addr>       - Memory dump (16 bytes)
+;   m[.b] <addr>   - Memory dump as bytes (16 bytes)
+;   m.w <addr>     - Memory dump as words (8 words)
+;   m.l <addr>     - Memory dump as longs (4 longwords)
 ;   m <addr> <hex> - Memory write (auto-sizes: 1-2=byte, 3-4=word, 5-8=long)
 ;   g              - Continue execution
 ;   g <addr>       - Continue from address
@@ -138,7 +140,7 @@ ParseCommand:
 
     ; Empty command - ignore
     tst.b   d0
-    beq.s   .done
+    beq     .done
 
     ; Convert to uppercase
     cmp.b   #'a',d0
@@ -149,30 +151,65 @@ ParseCommand:
 
 .check_cmd:
     cmp.b   #'R',d0
-    beq.s   .do_regs
+    beq     .do_regs
     cmp.b   #'M',d0
-    beq.s   .do_mem
+    beq     .check_mem_mode         ; Check for m, m.w, m.l
     cmp.b   #'G',d0
-    beq.s   .do_go
+    beq     .do_go
     cmp.b   #'?',d0
-    beq.s   .do_help
+    beq     .do_help
 
     ; Unknown command
     lea     .unknown(pc),a0
     bsr     SerialPutString
-    bra.s   .done
+    bra     .done
+
+.check_mem_mode:
+    ; Check for .w or .l suffix
+    cmp.b   #'.',1(a0)              ; Check char after 'M'
+    bne     .do_mem                 ; Plain 'm' - byte mode
+
+    move.b  2(a0),d0                ; Get char after '.'
+    ; Convert to uppercase
+    cmp.b   #'a',d0
+    blt.s   .check_w
+    sub.b   #32,d0
+.check_w:
+    cmp.b   #'B',d0
+    beq     .do_mem_byte            ; m.b = byte mode (same as m)
+    cmp.b   #'W',d0
+    beq     .do_mem_word
+    cmp.b   #'L',d0
+    beq     .do_mem_long
+    bra     .do_mem                 ; Unknown suffix, default to byte
+
+.do_mem_byte:
+    moveq   #0,d0                   ; Mode 0 = byte
+    bsr     CmdMemory
+    bra     .done
+
+.do_mem:
+    moveq   #0,d0                   ; Mode 0 = byte
+    bsr     CmdMemory
+    bra     .done
+
+.do_mem_word:
+    moveq   #1,d0                   ; Mode 1 = word
+    bsr     CmdMemory
+    bra     .done
+
+.do_mem_long:
+    moveq   #2,d0                   ; Mode 2 = long
+    bsr     CmdMemory
+    bra     .done
 
 .do_regs:
     bsr     CmdRegisters
-    bra.s   .done
-
-.do_mem:
-    bsr     CmdMemory
-    bra.s   .done
+    bra     .done
 
 .do_go:
     bsr     CmdGo
-    bra.s   .done
+    bra     .done
 
 .do_help:
     bsr     CmdHelp
@@ -388,28 +425,39 @@ CmdRegisters:
 ; ============================================================
 ; CmdMemory - Display or modify memory
 ; ============================================================
-; Syntax: m <addr>       - Dump 16 bytes
-;         m <addr> <val> - Write byte
+; Syntax: m[.b] <addr>   - Dump 16 bytes
+;         m.w <addr>     - Dump 8 words
+;         m.l <addr>     - Dump 4 longwords
+;         m <addr> <val> - Write byte/word/long
 ;         m              - Dump next 16 bytes
+; D0.w = mode (0=byte, 1=word, 2=long)
 CmdMemory:
-    movem.l d0-d4/a0-a1,-(sp)
+    movem.l d0-d5/a0-a1,-(sp)
+
+    move.w  d0,d5                       ; Save mode (0=byte, 1=word, 2=long)
 
     lea     DBG_CMD_BUF,a0
     addq.l  #1,a0                       ; Skip 'm'
+
+    ; Skip '.w' or '.l' suffix if present
+    cmp.b   #'.',(a0)
+    bne.s   .skip_done
+    addq.l  #2,a0                       ; Skip '.w' or '.l'
+.skip_done:
     bsr     SkipWhitespace
 
     ; Check if address follows
     move.b  (a0),d0
-    bne.s   .parse_addr
+    bne     .parse_addr
 
     ; No address - use last address + 16
     move.l  DBG_LAST_ADDR,d0
     add.l   #16,d0
-    bra.s   .have_addr
+    bra     .have_addr
 
 .parse_addr:
     bsr     ParseHex
-    beq.s   .bad_addr
+    beq     .bad_addr
 
 .have_addr:
     ; D0 = address
@@ -419,11 +467,11 @@ CmdMemory:
     ; Check if value follows (write mode)
     bsr     SkipWhitespace
     move.b  (a0),d0
-    beq.s   .dump_mode
+    beq     .dump_mode
 
     ; Parse value
     bsr     ParseHex
-    beq.s   .bad_value
+    beq     .bad_value
 
     ; Write based on digit count (D1 from ParseHex)
     cmp.w   #2,d1
@@ -447,7 +495,7 @@ CmdMemory:
 
 .write_ok:
     bsr     SerialPutString
-    bra.s   .done
+    bra     .done
 
 .dump_mode:
     ; Print address
@@ -457,30 +505,57 @@ CmdMemory:
     lea     .colon(pc),a0
     bsr     SerialPutString
 
-    ; Dump 16 bytes
+    ; Branch based on mode
+    tst.w   d5
+    beq.s   .dump_bytes
+    cmp.w   #1,d5
+    beq.s   .dump_words
+    bra.s   .dump_longs
+
+.dump_bytes:
+    ; 16 bytes
     moveq   #15,d4
-.dump_loop:
+.dump_byte_loop:
     move.b  #' ',d0
     bsr     SerialPutChar
-
     move.b  (a1)+,d0
     bsr     SerialPutHex8
+    dbf     d4,.dump_byte_loop
+    bra     .done
 
-    dbf     d4,.dump_loop
+.dump_words:
+    ; 8 words (16 bytes)
+    moveq   #7,d4
+.dump_word_loop:
+    move.b  #' ',d0
+    bsr     SerialPutChar
+    move.w  (a1)+,d0
+    bsr     SerialPutHex16
+    dbf     d4,.dump_word_loop
+    bra     .done
 
-    bra.s   .done
+.dump_longs:
+    ; 4 longwords (16 bytes)
+    moveq   #3,d4
+.dump_long_loop:
+    move.b  #' ',d0
+    bsr     SerialPutChar
+    move.l  (a1)+,d0
+    bsr     SerialPutHex
+    dbf     d4,.dump_long_loop
+    bra     .done
 
 .bad_addr:
     lea     .bad_addr_msg(pc),a0
     bsr     SerialPutString
-    bra.s   .done
+    bra     .done
 
 .bad_value:
     lea     .bad_val_msg(pc),a0
     bsr     SerialPutString
 
 .done:
-    movem.l (sp)+,d0-d4/a0-a1
+    movem.l (sp)+,d0-d5/a0-a1
     rts
 
 .ok_byte_msg:
@@ -564,9 +639,10 @@ CmdHelp:
     dc.b    "Commands:",10,13
     dc.b    "  r              Display all registers",10,13
     dc.b    "  r <reg> <hex>  Set register (D0-D7,A0-A7,PC,SR)",10,13
-    dc.b    "  m <addr>       Memory dump (16 bytes)",10,13
+    dc.b    "  m[.b] <addr>   Memory dump as bytes",10,13
+    dc.b    "  m.w <addr>     Memory dump as words",10,13
+    dc.b    "  m.l <addr>     Memory dump as longs",10,13
     dc.b    "  m <addr> <hex> Write memory (1-2=byte,3-4=word,5-8=long)",10,13
-    dc.b    "  m              Dump next 16 bytes",10,13
     dc.b    "  g              Continue execution",10,13
     dc.b    "  g <addr>       Continue from address",10,13
     dc.b    "  ?              This help",10,13
@@ -607,4 +683,20 @@ SerialPutHex8:
     bsr     SerialPutChar
 
     movem.l (sp)+,d0-d2
+    rts
+
+; ============================================================
+; SerialPutHex16 - Print word as 4 hex digits
+; ============================================================
+; D0.w = value to print
+SerialPutHex16:
+    movem.l d0-d1,-(sp)
+
+    move.w  d0,d1                   ; Save value
+    lsr.w   #8,d0                   ; Get high byte
+    bsr     SerialPutHex8
+    move.b  d1,d0                   ; Get low byte
+    bsr     SerialPutHex8
+
+    movem.l (sp)+,d0-d1
     rts

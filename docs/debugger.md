@@ -16,9 +16,11 @@ That's it! The script handles everything: starting the emulator, connecting to s
 |---------|-------------|---------|
 | `r` | Display all registers | `r` |
 | `r <reg> <hex>` | Set register (D0-D7, A0-A7, PC, SR) | `r D0 DEADBEEF` |
-| `m <addr>` | Memory dump (16 bytes) | `m FC0000` |
-| `m <addr> <hex>` | Write byte to memory | `m 1000 42` |
-| `m` | Continue dump from last address | `m` |
+| `m[.b] <addr>` | Memory dump as bytes (16 bytes) | `m 400` |
+| `m.w <addr>` | Memory dump as words (8 words) | `m.w FC0000` |
+| `m.l <addr>` | Memory dump as longs (4 longs) | `m.l 4` |
+| `m <addr> <hex>` | Write memory (auto-sizes: 1-2=byte, 3-4=word, 5-8=long) | `m 1000 DEADBEEF` |
+| `m[.b/.w/.l]` | Continue dump from last address | `m.w` |
 | `g` | Continue execution from saved PC | `g` |
 | `g <addr>` | Continue from specified address | `g FC1000` |
 | `?` | Display help | `?` |
@@ -26,6 +28,7 @@ That's it! The script handles everything: starting the emulator, connecting to s
 **Notes:**
 - Register names are case-insensitive (D0, d0, A5, a5)
 - Hex values can use `$` prefix or not ($DEAD, DEAD)
+- Memory dump modes: `.b` (bytes), `.w` (words), `.l` (longs) - all dump 16 bytes total
 - Type `quit`, `exit`, or press Ctrl-D to exit
 
 ## Example Session
@@ -68,6 +71,14 @@ $00000010: 00 FC 02 0C 00 FC 02 16 00 FC 02 20 00 FC 02 2A
 $00FC0000: 00 00 3F FC 00 FC 00 10 41 4D 41 47 00 01 00 00
                                     A  M  A  G  (magic)
 
+> m.w FC0000
+$00FC0000: 0000 3FFC 00FC 0010 414D 4147 0001 0000
+                                    A M  A G  (magic as words)
+
+> m.l 4
+$00000004: 00FC01F8 00FC0202 00FC020C 00FC0216
+           (exception vectors as longs)
+
 > quit
 Exiting debugger...
 ```
@@ -92,14 +103,21 @@ Then type commands in Terminal 1.
 
 ### Examine Exception Vectors
 ```
-> m 0        # Reset vectors
-> m 8        # Bus error handler
-> m C        # Address error handler
+> m.l 0      # Reset vectors as longs
+> m.l 8      # Bus error handler (better as long for addresses)
 ```
 
 ### Check ROM Header
 ```
-> m FC0000   # Should show "AMAG" magic at offset 8
+> m FC0000   # Bytes - shows "AMAG" magic at offset 8
+> m.w FC0000 # Words - view as 16-bit instruction opcodes
+```
+
+### View Different Data Types
+```
+> m 1000     # Bytes - strings, raw data
+> m.w FC0000 # Words - 68000 instructions, pointers
+> m.l 4      # Longs - 32-bit addresses, exception vectors
 ```
 
 ### Modify and Test Register
@@ -169,7 +187,6 @@ All tests should pass with no errors.
 
 - Serial input only (no keyboard support)
 - No bus error protection on memory access
-- Single-byte memory writes only
 - No breakpoints or single-step
 - No command history (except backspace)
 
