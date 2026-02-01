@@ -77,7 +77,7 @@ FindRDB:
     lea     RDB_BUFFER,a0           ; Destination
     move.l  d7,d0                   ; LBA = current block
     moveq   #1,d1                   ; Read 1 sector
-    bsr     IDERead
+    bsr     ide_read
     tst.l   d0
     bne     .read_error             ; Error reading
 
@@ -197,7 +197,7 @@ LoadPartition:
     lea     PART_BUFFER,a0
     moveq   #1,d0                   ; LBA 1
     moveq   #1,d1                   ; 1 sector
-    bsr     IDERead
+    bsr     ide_read
     tst.l   d0
     bne     .read_error
 

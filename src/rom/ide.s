@@ -37,7 +37,7 @@ IDE_TIMEOUT     equ $100000         ; Timeout counter
 IDE_DEST        equ $30000
 
 ; ============================================================
-; IDERead - Read sectors from IDE drive
+; ide_read - Read sectors from IDE drive
 ; ============================================================
 ; Input:
 ;   A0.l = Destination buffer (must be word-aligned)
@@ -48,7 +48,7 @@ IDE_DEST        equ $30000
 ; Preserves: D2-D7/A2-A6 (Amiga convention)
 ; Scratches: D0-D1/A0-A1
 ; ============================================================
-IDERead:
+ide_read:
     movem.l d2-d3,-(sp)
 
     ; Save inputs immediately (before any calls that clobber D0/D1)
@@ -62,7 +62,7 @@ IDERead:
     bhi     .invalid                ; D3 > 256 is error
 
     ; Wait for drive not busy
-    bsr     IDEWaitNotBusy
+    bsr     ide_wait_not_busy
     tst.l   d0
     bne     .exit                   ; Timeout, return -1
 
@@ -99,7 +99,7 @@ IDERead:
     ; Read sectors
 .sector_loop:
     ; Wait for DRQ or error
-    bsr     IDEWaitDRQ
+    bsr     ide_wait_drq
     tst.l   d0
     bne     .exit                   ; Error, return -1
 
@@ -114,7 +114,7 @@ IDERead:
     bne.s   .sector_loop
 
     ; Wait for drive not busy after transfer
-    bsr     IDEWaitNotBusy
+    bsr     ide_wait_not_busy
     tst.l   d0
     bne     .exit                   ; Timeout, return -1
 
@@ -136,13 +136,13 @@ IDERead:
     rts
 
 ; ============================================================
-; IDETestRead - Read sector 0 to $30000
+; ide_test_read - Read sector 0 to $30000
 ; ============================================================
 ; Input:  None
 ; Output: D0 = 0 success, -1 error
 ; Preserves: All registers except D0
 ; ============================================================
-IDETestRead:
+ide_test_read:
     movem.l d1-d7/a0-a6,-(sp)
 
     ; Print start message
@@ -163,11 +163,11 @@ IDETestRead:
     bra     .exit
 
 .drive_present:
-    ; Call IDERead(dest=$30000, lba=0, count=1)
+    ; Call ide_read(dest=$30000, lba=0, count=1)
     lea     IDE_DEST,a0
     moveq   #0,d0                   ; LBA 0
     moveq   #1,d1                   ; 1 sector
-    bsr     IDERead
+    bsr     ide_read
     tst.l   d0
     bne     .error
 
@@ -209,12 +209,12 @@ IDETestRead:
     even
 
 ; ============================================================
-; IDEWaitNotBusy - Wait for BSY bit to clear
+; ide_wait_not_busy - Wait for BSY bit to clear
 ; ============================================================
 ; Output: D0 = 0 success, -1 timeout
 ; Preserves: All except D0
 ; ============================================================
-IDEWaitNotBusy:
+ide_wait_not_busy:
     movem.l d1-d2,-(sp)
     move.l  #IDE_TIMEOUT,d1
 .loop:
@@ -233,12 +233,12 @@ IDEWaitNotBusy:
     rts
 
 ; ============================================================
-; IDEWaitDRQ - Wait for DRQ bit or error
+; ide_wait_drq - Wait for DRQ bit or error
 ; ============================================================
 ; Output: D0 = 0 (DRQ set), -1 (error/timeout)
 ; Preserves: All except D0
 ; ============================================================
-IDEWaitDRQ:
+ide_wait_drq:
     movem.l d1-d2,-(sp)
     move.l  #IDE_TIMEOUT,d1
 .loop:

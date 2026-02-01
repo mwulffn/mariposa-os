@@ -193,7 +193,7 @@ FAT16Init:
     lea     FS_BOOT_BUFFER,a0
     move.l  FSV_PARTITION_LBA(a3),d0    ; LBA
     moveq   #1,d1                       ; 1 sector
-    bsr     IDERead
+    bsr     ide_read
     tst.l   d0
     bne     .read_error
 
@@ -383,7 +383,7 @@ FAT16FindFile:
     move.l  FSV_PARTITION_LBA(a3),d0
     add.l   d6,d0                       ; LBA = partition + root_start + offset
     moveq   #1,d1                       ; 1 sector
-    bsr     IDERead
+    bsr     ide_read
     tst.l   d0
     bne     .read_error
 
@@ -528,7 +528,7 @@ FAT16ReadCluster:
     move.l  a4,a0               ; destination
     moveq   #0,d1
     move.b  FSV_SEC_PER_CLUS(a3),d1     ; number of sectors
-    bsr     IDERead
+    bsr     ide_read
     tst.l   d0
     bne     .error
 
@@ -593,7 +593,7 @@ FAT16GetNextCluster:
     ; d0 already contains LBA
     lea     FS_FAT_BUFFER,a0
     moveq   #1,d1                       ; 1 sector
-    bsr     IDERead
+    bsr     ide_read
     tst.l   d0
     bne     .error
 
