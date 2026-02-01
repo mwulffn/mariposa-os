@@ -51,34 +51,47 @@ IDE_DEST        equ $30000
 IDERead:
     movem.l d2-d3,-(sp)
 
+    ; Save inputs immediately (before any calls that clobber D0/D1)
+    move.l  d0,d2                   ; Save LBA
+    move.w  d1,d3                   ; Save sector count
+
     ; Validate inputs
-    tst.w   d1
-    beq     .invalid                ; D1 == 0 is error
-    cmp.w   #256,d1
-    bhi     .invalid                ; D1 > 256 is error
+    tst.w   d3
+    beq     .invalid                ; D3 == 0 is error
+    cmp.w   #256,d3
+    bhi     .invalid                ; D3 > 256 is error
 
     ; Wait for drive not busy
     bsr     IDEWaitNotBusy
     tst.l   d0
     bne     .exit                   ; Timeout, return -1
 
-    ; Set up LBA registers from D0
-    ; Save D1 (sector count) in D3
-    move.w  d1,d3
+    ; Set up LBA registers from D2 (saved LBA)
 
-    ; D0.l = LBA, need to split into 4 bytes
+    ; D2.l = LBA (saved copy), split into 4 bytes
+    move.l  d2,d0                   ; Copy for extraction
     move.b  d0,IDE_SECTOR           ; LBA bits 0-7
+    nop
+    nop
     lsr.l   #8,d0
     move.b  d0,IDE_LCYL             ; LBA bits 8-15
+    nop
+    nop
     lsr.l   #8,d0
     move.b  d0,IDE_HCYL             ; LBA bits 16-23
+    nop
+    nop
     lsr.l   #8,d0
     and.b   #$0F,d0                 ; LBA bits 24-27
     or.b    #IDE_LBA_MASTER,d0      ; Add LBA mode + master
     move.b  d0,IDE_SELECT
+    nop
+    nop
 
     ; Set sector count
     move.b  d3,IDE_NSECTOR          ; Low byte of D3
+    nop
+    nop
 
     ; Issue read command
     move.b  #IDE_CMD_READ,IDE_COMMAND

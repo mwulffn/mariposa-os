@@ -24,3 +24,7 @@ kickstart_file = build/kick.rom
 # Connect with: nc localhost 5555
 # Use /wait to capture boot-time output
 serial_port = tcp://127.0.0.1:5555/wait
+
+# Hard Drive
+hard_drive_0 = harddrives/boot.hdf
+hard_drive_0_controller = ide0

@@ -90,7 +90,15 @@ Start:
     ; 6. RDB DETECTION
     ; ============================================================
     bsr     FindRDB
+    tst.l   d0
+    bne.s   .skip_partition         ; Skip if RDB not found
 
+    ; ============================================================
+    ; 7. PARTITION LOADING
+    ; ============================================================
+    bsr     LoadPartition
+
+.skip_partition:
     ; Enter interactive debugger
     jmp     DebuggerEntry
 
