@@ -8,8 +8,9 @@
 ; hardware.i already included by bootstrap.s
 
 ; ============================================================
-; ConfigureZorroII - Configure Zorro II expansion cards
+; configure_zorro_ii - Configure Zorro II expansion cards
 ; Returns: d0.l = base address for first memory card (or 0)
+; Clobbers: d2-d6, a2, a6
 ; ============================================================
 ; Zorro II autoconfig protocol:
 ; 1. Cards initially respond at $E80000
@@ -20,15 +21,15 @@
 ; 6. Card relocates to new address and stops responding at $E80000
 ; 7. Repeat for next card
 ; ============================================================
-ConfigureZorroII:
-    movem.l d1-d6/a0-a2,-(sp)
+configure_zorro_ii:
+    movem.l d2-d6/a2/a6,-(sp)
 
     ; MAGENTA - Entering autoconfig
-    lea     CUSTOM,a1
-    move.w  #$F0F,COLOR00(a1)
+    lea     CUSTOM,a6
+    move.w  #$F0F,COLOR00(a6)
 
     ; Print entry message
-    lea     AutoconfigStartMsg(pc),a0
+    lea     autoconfig_start_msg(pc),a0
     bsr     SerialPutString
 
     move.l  #$200000,d3         ; Next allocation address
@@ -39,19 +40,19 @@ ConfigureZorroII:
 .next_card:
     ; Check safety counter
     dbf     d4,.check_card
-    lea     MaxCardsMsg(pc),a0
+    lea     max_cards_msg(pc),a0
     bsr     SerialPutString
     bra   .done
 
 .check_card:
     ; CYAN - Reading card
-    move.w  #$0FF,COLOR00(a1)
+    move.w  #$0FF,COLOR00(a6)
 
     lea     ZORRO_BASE,a2       ; a2 = ZORRO_BASE (preserve through calls!)
 
     ; Read er_Type (register 00)
     moveq   #0,d1               ; Register offset 0
-    bsr     ReadZorroReg
+    bsr     read_zorro_reg
     move.b  d0,d1               ; d1 = er_Type
 
     ; Check for no card (register 00 is NOT inverted, $FF = no card)
@@ -74,7 +75,7 @@ ConfigureZorroII:
 
     ; Read er_Flags (register 08)
     moveq   #8,d1               ; Register offset 8
-    bsr     ReadZorroReg
+    bsr     read_zorro_reg
     ; Registers except 00 are inverted
     eor.b   #$FF,d0             ; Invert to get logical value
     move.b  d0,d2               ; d2 = er_Flags
@@ -84,9 +85,9 @@ ConfigureZorroII:
     beq   .io_card
 
     ; YELLOW - Memory card found
-    move.w  #$FF0,COLOR00(a1)
+    move.w  #$FF0,COLOR00(a6)
 
-    lea     MemoryCardMsg(pc),a0
+    lea     memory_card_msg(pc),a0
     bsr     SerialPutString
 
     ; Memory card - allocate at current address
@@ -97,16 +98,16 @@ ConfigureZorroII:
 .not_first:
     ; Print base address
     move.l  d3,-(sp)            ; Push address value
-    pea     AllocatingAtFmt(pc)
+    pea     allocating_at_fmt(pc)
     bsr     SerialPrintf
     addq.l  #8,sp               ; Clean up stack (format + 1 arg)
 
     ; Write base address to card
     move.l  d3,d0               ; d0 = base address
-    bsr     WriteBaseAddress
+    bsr     write_base_address
 
     ; ORANGE - Card relocated
-    move.w  #$F80,COLOR00(a1)
+    move.w  #$F80,COLOR00(a6)
 
     ; Get size code from saved er_Type
     moveq   #0,d1
@@ -135,60 +136,63 @@ ConfigureZorroII:
     addq.l  #2,sp               ; Pop the byte (aligned to word)
 
     ; RED - I/O card found
-    move.w  #$F00,COLOR00(a1)
-    lea     IOCardMsg(pc),a0
+    move.w  #$F00,COLOR00(a6)
+    lea     io_card_msg(pc),a0
     bsr     SerialPutString
     ; I/O card - just shut it up for now
     move.b  #$FF,$4C(a2)        ; Write to shutup register (a2=ZORRO_BASE)
     bra   .next_card
 
 .no_card:
-    lea     NoCardMsg(pc),a0
+    lea     no_card_msg(pc),a0
     bsr     SerialPutString
 
 .done:
     ; BLUE - Autoconfig done
-    move.w  #$00F,COLOR00(a1)
+    move.w  #$00F,COLOR00(a6)
 
     ; Print completion message
     move.l  d5,-(sp)            ; Push first RAM base address
-    pea     AutoconfigDoneFmt(pc)
+    pea     autoconfig_done_fmt(pc)
     bsr     SerialPrintf
     addq.l  #8,sp               ; Clean up stack (format + 1 arg)
 
     move.l  d5,d0               ; Return first RAM base in d0
-    movem.l (sp)+,d1-d6/a0-a2
+    movem.l (sp)+,d2-d6/a2/a6
     rts
 
 ; ============================================================
-; ReadZorroReg - Read a Zorro II nibble-packed register
-; Input:  a2 = ZORRO_BASE, d1 = register offset (0, 8, etc.)
-; Output: d0.b = register value (combined nibbles)
-; Clobbers: d1, d2
+; read_zorro_reg - Read a Zorro II nibble-packed register
 ; ============================================================
-ReadZorroReg:
+; Input:  a2 = ZORRO_BASE, d1.w = register offset (0, 8, etc.)
+; Output: d0.b = register value (combined nibbles)
+; Clobbers: d1
+; ============================================================
+read_zorro_reg:
     ; Read high nibble from offset+0
     move.w  0(a2,d1.w),d0       ; Read word at offset
+    addq.w  #2,d1               ; Advance to offset+2
     and.l   #$0000f000,d0
-    rol.w   #4,d0               ; Rotate D15-D12 to D3-D0
-    and.w   #$0F,d0             ; Mask high nibble (bits 7-4)
-    lsl.b   #4,d0               ; Shift to bits 7-4
+    rol.w   #4,d0
+    and.w   #$0F,d0
+    lsl.b   #4,d0               ; High nibble in bits 7-4
 
     ; Read low nibble from offset+2
-    move.w  2(a2,d1.w),d2       ; Read word at offset+2
-    and.l   #$0000f000,d2
-    rol.w   #4,d2               ; Rotate D15-D12 to D3-D0
-    and.w   #$0F,d2             ; Mask low nibble (bits 3-0)
-    or.b    d2,d0               ; Combine: d0 = full register byte
+    move.w  0(a2,d1.w),d1       ; Reuse d1 for low nibble
+    and.l   #$0000f000,d1
+    rol.w   #4,d1
+    and.w   #$0F,d1
+    or.b    d1,d0               ; Combine nibbles
     rts
 
 ; ============================================================
-; WriteBaseAddress - Write base address to Zorro II card
-; Input:  a2 = ZORRO_BASE, d0.l = base address
-; Output: none
-; Clobbers: d1, d2
+; write_base_address - Write base address to Zorro II card
 ; ============================================================
-WriteBaseAddress:
+; Input:  a2 = ZORRO_BASE, d0.l = base address
+; Clobbers: d1
+; ============================================================
+write_base_address:
+    move.l  d2,-(sp)            ; Save callee-save register
     ; Write nibbles to config registers
     ; Each nibble goes in upper 4 bits of a BYTE write
     ; Extract and write A31-A24
@@ -213,36 +217,37 @@ WriteBaseAddress:
     move.b  d1,d2
     and.b   #$F0,d2             ; High nibble (A23-A20)
     move.b  d2,$48(a2)          ; TRIGGERS!
+    move.l  (sp)+,d2            ; Restore callee-save register
     rts
 
 ; ============================================================
 ; Data
 ; ============================================================
-AutoconfigStartMsg:
+autoconfig_start_msg:
     dc.b    "Autoconfig: Scanning Zorro bus...",10,13,0
     even
 
-NoCardMsg:
+no_card_msg:
     dc.b    "  No card found",10,13,0
     even
 
-MemoryCardMsg:
+memory_card_msg:
     dc.b    "  Memory card found!",10,13,0
     even
 
-AllocatingAtFmt:
+allocating_at_fmt:
     dc.b    "  Allocating at: $%x",10,13,0
     even
 
-IOCardMsg:
+io_card_msg:
     dc.b    "  I/O card found, shutting up",10,13,0
     even
 
-MaxCardsMsg:
+max_cards_msg:
     dc.b    "  Max cards reached",10,13,0
     even
 
-AutoconfigDoneFmt:
+autoconfig_done_fmt:
     dc.b    "Autoconfig: Done, first RAM base: $%x",10,13,0
     even
 

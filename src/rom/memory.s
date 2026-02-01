@@ -84,7 +84,7 @@ DetectChipRAM:
 ; DetectFastRAM - Detect fast RAM (Zorro expansion)
 ; Returns: d0.l = fast RAM size in bytes (0 if none)
 ; ============================================================
-; Probes $200000 for Zorro II RAM (must call ConfigureZorroII first!)
+; Probes $200000 for Zorro II RAM (must call configure_zorro_ii first!)
 ; ============================================================
 DetectFastRAM:
     movem.l d1-d3/a0,-(sp)

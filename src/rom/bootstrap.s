@@ -58,7 +58,7 @@ Start:
     ; ============================================================
     ; 3. MEMORY DETECTION
     ; ============================================================
-    bsr     ConfigureZorroII    ; Must be first (for fast RAM)
+    bsr     configure_zorro_ii  ; Must be first (for fast RAM)
     bsr     BuildMemoryTable    ; Detects, tests, builds table
 
     ; ============================================================
