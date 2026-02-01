@@ -1,23 +1,22 @@
-/* kernel.ld - vlink linker script for kernel */
-
-SECTIONS {
+SECTIONS
+{
     . = 0x200000;
 
-    .text: {
+    .text : {
         *(.text)
         *(CODE)
     }
 
-    .rodata: {
+    .rodata : {
         *(.rodata)
     }
 
-    .data: {
+    .data : {
         *(.data)
         *(DATA)
     }
 
-    .bss: {
+    .bss : {
         __bss_start = .;
         *(.bss)
         *(BSS)
