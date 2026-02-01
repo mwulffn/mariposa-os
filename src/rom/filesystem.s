@@ -59,6 +59,11 @@ FSV_CACHED_FAT_SEC  equ 24          ; long (-1 if none)
 LoadSystemBin:
     movem.l d2-d7/a0-a6,-(sp)
 
+    ; Print entry message
+    pea     .msg_entry(pc)
+    bsr     SerialPrintf
+    addq.l  #4,sp
+
     ; Initialize filesystem
     bsr     FAT16Init
     tst.l   d0
@@ -80,8 +85,9 @@ LoadSystemBin:
     cmp.l   #$80000,d4
     bhi     .file_too_large
 
-    lea     .msg_loading(pc),a0
+    pea     .msg_loading(pc)
     bsr     SerialPrintf
+    addq.l  #4,sp
 
 .read_loop:
     ; Read current cluster
@@ -129,8 +135,9 @@ LoadSystemBin:
     rts
 
 .file_too_large:
-    lea     .msg_too_large(pc),a0
+    pea     .msg_too_large(pc)
     bsr     SerialPrintf
+    addq.l  #4,sp
     moveq   #-1,d0
     movem.l (sp)+,d2-d7/a0-a6
     rts
@@ -139,6 +146,10 @@ LoadSystemBin:
     moveq   #-1,d0
     movem.l (sp)+,d2-d7/a0-a6
     rts
+
+.msg_entry:
+    dc.b    'FAT16: LoadSystemBin called',13,10,0
+    even
 
 .filename:
     dc.b    'SYSTEM  BIN',0
@@ -168,8 +179,9 @@ LoadSystemBin:
 FAT16Init:
     movem.l d1-d7/a0-a6,-(sp)
 
-    lea     .msg_init(pc),a0
+    pea     .msg_init(pc)
     bsr     SerialPrintf
+    addq.l  #4,sp
 
     ; Save partition LBA
     lea     FS_VARS,a3
@@ -298,15 +310,17 @@ FAT16Init:
     rts
 
 .invalid_sig:
-    lea     .msg_invalid(pc),a0
+    pea     .msg_invalid(pc)
     bsr     SerialPrintf
+    addq.l  #4,sp
     moveq   #-1,d0
     movem.l (sp)+,d1-d7/a0-a6
     rts
 
 .read_error:
-    lea     .msg_readerror(pc),a0
+    pea     .msg_readerror(pc)
     bsr     SerialPrintf
+    addq.l  #4,sp
     moveq   #-1,d0
     movem.l (sp)+,d1-d7/a0-a6
     rts
@@ -354,8 +368,9 @@ FAT16FindFile:
 
     move.l  a0,a4               ; save filename pointer
 
-    lea     .msg_search(pc),a0
+    pea     .msg_search(pc)
     bsr     SerialPrintf
+    addq.l  #4,sp
 
     lea     FS_VARS,a3
     moveq   #0,d7
@@ -406,8 +421,9 @@ FAT16FindFile:
     dbf     d4,.cmp_loop
 
     ; Found it!
-    lea     .msg_found(pc),a0
+    pea     .msg_found(pc)
     bsr     SerialPrintf
+    addq.l  #4,sp
 
     ; Extract starting cluster (little-endian word at offset 26)
     moveq   #0,d1
@@ -445,15 +461,17 @@ FAT16FindFile:
     bne     .sector_loop
 
 .not_found:
-    lea     .msg_notfound(pc),a0
+    pea     .msg_notfound(pc)
     bsr     SerialPrintf
+    addq.l  #4,sp
     moveq   #-1,d0
     movem.l (sp)+,d3-d7/a0-a6
     rts
 
 .read_error:
-    lea     .msg_readerror(pc),a0
+    pea     .msg_readerror(pc)
     bsr     SerialPrintf
+    addq.l  #4,sp
     moveq   #-1,d0
     movem.l (sp)+,d3-d7/a0-a6
     rts
@@ -520,8 +538,9 @@ FAT16ReadCluster:
     rts
 
 .error:
-    lea     .msg_error(pc),a0
+    pea     .msg_error(pc)
     bsr     SerialPrintf
+    addq.l  #4,sp
     moveq   #-1,d0
     movem.l (sp)+,d1-d7/a0-a6
     rts
@@ -592,8 +611,9 @@ FAT16GetNextCluster:
     rts
 
 .error:
-    lea     .msg_error(pc),a0
+    pea     .msg_error(pc)
     bsr     SerialPrintf
+    addq.l  #4,sp
     moveq   #-1,d0
     movem.l (sp)+,d1-d7/a0-a6
     rts

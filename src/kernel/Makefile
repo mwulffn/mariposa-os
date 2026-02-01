@@ -18,7 +18,7 @@ TARGET  = $(BUILD)/SYSTEM.BIN
 
 # Sources
 ASRC    = crt0.s
-CSRC    = kernel.c
+CSRC    = kernel.c mem.c serial.c kprintf.c
 
 # Objects
 AOBJ    = $(ASRC:%.s=$(BUILD)/%.o)
