@@ -244,8 +244,8 @@ class AmigaDebugger:
 def main():
     """Entry point"""
     # Check if ROM exists
-    if not os.path.exists('build/kick.rom'):
-        print("Error: ROM not found at build/kick.rom")
+    if not os.path.exists('src/rom/build/kick.rom'):
+        print("Error: ROM not found at src/rom/build/kick.rom")
         print("Please run 'make' first to build the ROM.")
         return 1
 

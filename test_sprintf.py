@@ -28,7 +28,7 @@ def main():
     print("=" * 60)
 
     # Check ROM exists
-    rom_path = "build/kick.rom"
+    rom_path = "src/rom/build/kick.rom"
     if not os.path.exists(rom_path):
         print(f"ERROR: {rom_path} not found. Run 'make' first.")
         return 1

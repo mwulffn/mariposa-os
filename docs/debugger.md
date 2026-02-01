@@ -134,7 +134,7 @@ Then type commands in Terminal 1.
 
 ## Troubleshooting
 
-**"ROM not found at build/kick.rom"**
+**"ROM not found at src/rom/build/kick.rom"**
 ```bash
 make           # Build ROM first
 ./debug.py

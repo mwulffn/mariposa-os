@@ -39,7 +39,8 @@ src/rom/
   debugger.s                  - Interactive debugger (~630 lines)
   hardware.i                  - Hardware definitions
   memory.s                    - Memory detection and management
-  build/kick.rom              - Compiled ROM (256KB)
+  build/
+    kick.rom                  - Compiled ROM (256KB)
 src/kernel/
   Makefile                    - Kernel build
   kernel.c                    - Kernel entry point

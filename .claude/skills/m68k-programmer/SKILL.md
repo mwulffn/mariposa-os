@@ -18,7 +18,7 @@ Invoke this skill when:
 ## Assembler: VASM (Motorola syntax)
 
 ```bash
-vasmm68k_mot -Fbin -m68000 -no-opt -I src -o build/kick.rom src/bootstrap.s
+vasmm68k_mot -Fbin -m68000 -no-opt -I. -o build/kick.rom bootstrap.s
 ```
 
 ### Reserved words - DO NOT use as labels:
