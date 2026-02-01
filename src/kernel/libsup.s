@@ -47,9 +47,12 @@ __divu:
         move.l  d2,d0
         divu    d3,d0           ; d0.w = quotient, d0 high = remainder
         bvs.s   .full_divide    ; Overflow, use slow path
-        
+
+        move.l  d0,d1           ; Save full result
+        swap    d1              ; d1 = remainder (was in high word)
+        and.l   #$FFFF,d1       ; Clear high word, d1 = remainder only
+        and.l   #$FFFF,d0       ; Clear remainder, d0 = quotient only
         movem.l (sp)+,d2-d3
-        and.l   #$FFFF,d0       ; Clear remainder, keep quotient
         rts
 
 .full_divide:
@@ -83,29 +86,37 @@ __divu:
 __divs:
         tst.l   d1
         beq.s   .sdiv_zero
-        
+
         movem.l d2-d3,-(sp)
-        
-        moveq   #0,d2           ; Sign flag
-        
+
+        moveq   #0,d2           ; Quotient sign flag
+        moveq   #0,d3           ; Remainder sign flag (= dividend sign)
+
         tst.l   d0
         bpl.s   .sdiv_pos1
         neg.l   d0
         not.b   d2
+        not.b   d3              ; Remainder gets dividend's sign
 .sdiv_pos1:
         tst.l   d1
         bpl.s   .sdiv_pos2
         neg.l   d1
-        not.b   d2
+        not.b   d2              ; Only quotient changes with divisor sign
 .sdiv_pos2:
-        ; Now both operands positive, d2 = sign of result
-        move.l  d2,-(sp)        ; Save sign
+        ; Now both operands positive, d2 = quotient sign, d3 = remainder sign
+        move.w  d2,-(sp)        ; Save both sign flags (byte each)
+        move.w  d3,-(sp)
         bsr.s   __divu_inner
-        move.l  (sp)+,d2
-        
+        move.w  (sp)+,d3        ; Restore remainder sign
+        move.w  (sp)+,d2        ; Restore quotient sign
+
         tst.b   d2
+        beq.s   .sdiv_quot_done
+        neg.l   d0              ; Negate quotient if needed
+.sdiv_quot_done:
+        tst.b   d3
         beq.s   .sdiv_done
-        neg.l   d0
+        neg.l   d1              ; Negate remainder if needed
 .sdiv_done:
         movem.l (sp)+,d2-d3
         rts
@@ -123,20 +134,23 @@ __divs:
 __divu_inner:
         move.l  d1,d3
         move.l  d0,d2
-        
+
         cmp.l   #$10000,d3
         bhs.s   .full2
-        
+
         move.l  d2,d0
         clr.w   d0
         swap    d0
         cmp.l   d3,d0
         bhs.s   .full2
-        
+
         move.l  d2,d0
         divu    d3,d0
         bvs.s   .full2
-        and.l   #$FFFF,d0
+        move.l  d0,d1           ; Save full result
+        swap    d1              ; d1 = remainder (was in high word)
+        and.l   #$FFFF,d1       ; Clear high word, d1 = remainder only
+        and.l   #$FFFF,d0       ; Clear remainder, d0 = quotient only
         rts
 
 .full2:

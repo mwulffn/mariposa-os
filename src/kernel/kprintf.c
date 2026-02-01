@@ -72,27 +72,10 @@ static int ultoa(unsigned long val, char *buf, unsigned long base, int uppercase
         return 1;
     }
 
-    /* VBCC compiler bug workaround: modulo with parameter doesn't work correctly.
-     * Use hardcoded constants for common bases */
-    if (base == 16) {
-        while (val) {
-            digit = val & 0xF;  /* val % 16 using bitwise AND */
-            tmp[i++] = digits[digit];
-            val >>= 4;  /* val / 16 using shift */
-        }
-    } else if (base == 10) {
-        while (val) {
-            digit = val - (val / 10) * 10;  /* Manual modulo */
-            tmp[i++] = digits[digit];
-            val /= 10;
-        }
-    } else {
-        /* Fallback for other bases - may not work due to VBCC bug */
-        while (val) {
-            digit = val % base;
-            tmp[i++] = digits[digit];
-            val /= base;
-        }
+    while (val) {
+        digit = val % base;
+        tmp[i++] = digits[digit];
+        val /= base;
     }
 
     len = i;
