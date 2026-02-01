@@ -58,7 +58,7 @@ static const char digits_lower[] = "0123456789abcdef";
 static const char digits_upper[] = "0123456789ABCDEF";
 
 /* Convert unsigned long to string, return length */
-int ultoa(unsigned long val, char *buf, unsigned long base, int uppercase)
+static int ultoa(unsigned long val, char *buf, unsigned long base, int uppercase)
 {
     const char *digits = uppercase ? digits_upper : digits_lower;
     char tmp[24];  /* Enough for 64-bit in binary */
