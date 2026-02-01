@@ -101,6 +101,15 @@ Start:
     bne     .enter_debugger         ; Go to debugger if error
     ; On success: D1 = partition start LBA, D2 = partition size in blocks
 
+    ; ============================================================
+    ; 8. LOAD SYSTEM.BIN FROM PARTITION
+    ; ============================================================
+    ; D1 = partition start LBA, D2 = partition size
+    bsr     LoadSystemBin
+    tst.l   d0
+    bne     .enter_debugger         ; Go to debugger if error
+    ; On success: D1 = file size, kernel loaded at $200000
+
 .enter_debugger:
     ; Enter interactive debugger
     jmp     DebuggerEntry
@@ -360,6 +369,7 @@ GenericExcMsg:
     include "debugger.s"
     include "ide.s"
     include "partition.s"
+    include "filesystem.s"
 
 ; ============================================================
 ; ROM footer - pad to 256KB and add checksum location
