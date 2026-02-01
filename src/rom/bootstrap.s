@@ -86,6 +86,11 @@ Start:
     lea     SuccessMsg(pc),a0
     bsr     SerialPutString
 
+    ; ============================================================
+    ; 6. IDE TEST
+    ; ============================================================
+    bsr     IDETestRead
+
     ; Enter interactive debugger
     jmp     DebuggerEntry
 
@@ -342,6 +347,7 @@ GenericExcMsg:
     include "serial.s"
     include "sprintf.s"
     include "debugger.s"
+    include "ide.s"
 
 ; ============================================================
 ; ROM footer - pad to 256KB and add checksum location

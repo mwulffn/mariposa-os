@@ -21,6 +21,7 @@ window_width = 720
 kickstart_file = build/kick.rom
 
 hard_drive_0 = harddrives/boot.hdf
+hard_drive_0_controller = ide0
 
 # Serial Port - Debug output via TCP
 # Connect with: nc localhost 5555
