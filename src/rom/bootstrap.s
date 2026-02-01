@@ -140,7 +140,7 @@ start:
     ; A0 = memory map pointer
     lea     MEMMAP_TABLE,a0
     ; A1 = ROM panic handler
-    lea     DebuggerEntry(pc),a1
+    lea     debugger_entry(pc),a1
     ; SR = supervisor, interrupts disabled
     move.w  #$2700,sr
     ; SP = top of fast RAM
@@ -155,7 +155,7 @@ start:
 
 .enter_debugger:
     ; Enter interactive debugger
-    jmp     DebuggerEntry
+    jmp     debugger_entry
 
 ; ============================================================
 ; install_exception_vectors - Install all exception handlers

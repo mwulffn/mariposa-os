@@ -14,23 +14,23 @@
 ; ============================================================
 
 ; ============================================================
-; DebuggerEntry - Entry point from boot
+; debugger_entry - Entry point from boot
 ; ============================================================
 ; Saves all registers and enters interactive debugger
-DebuggerEntry:
+debugger_entry:
     ; Save registers to dump area
     movem.l d0-d7/a0-a6,saved_regs
     move.l  sp,saved_a7
     move.w  sr,saved_sr
-    move.l  #DebuggerEntry,saved_pc      ; Boot entry, not a crash
+    move.l  #debugger_entry,saved_pc      ; Boot entry, not a crash
 
-    ; Fall through to DebuggerMain
+    ; Fall through to debugger_main
 
 ; ============================================================
-; DebuggerMain - Main debugger loop
+; debugger_main - Main debugger loop
 ; ============================================================
 ; Displays prompt, reads commands, dispatches to handlers
-DebuggerMain:
+debugger_main:
     ; Initialize debugger state
     clr.l   DBG_BUF_IDX
     clr.l   DBG_LAST_ADDR
@@ -48,10 +48,10 @@ DebuggerMain:
     bsr     SerialPutString
 
     ; Read command line
-    bsr     DbgReadLine
+    bsr     dbg_read_line
 
     ; Parse and dispatch
-    bsr     ParseCommand
+    bsr     parse_command
 
     ; Loop
     bra.s   .cmd_loop
@@ -64,13 +64,11 @@ DebuggerMain:
     even
 
 ; ============================================================
-; DbgReadLine - Read command line from serial
+; dbg_read_line - Read command line from serial
 ; ============================================================
 ; Reads until Enter, handles backspace, stores in DBG_CMD_BUF
 ; Returns with buffer null-terminated
-DbgReadLine:
-    movem.l d0-d2/a0,-(sp)
-
+dbg_read_line:
     lea     DBG_CMD_BUF,a0
     moveq   #0,d1                       ; Buffer index
 
@@ -121,22 +119,18 @@ DbgReadLine:
 .done:
     ; Null terminate
     clr.b   (a0,d1.w)
-
-    movem.l (sp)+,d0-d2/a0
     rts
 
 ; ============================================================
-; ParseCommand - Parse and dispatch command
+; parse_command - Parse and dispatch command
 ; ============================================================
 ; Reads first character from DBG_CMD_BUF and dispatches
-ParseCommand:
-    movem.l d0/a0,-(sp)
-
+parse_command:
     lea     DBG_CMD_BUF,a0
     move.b  (a0),d0
 
     ; Skip leading spaces
-    bsr     SkipWhitespace
+    bsr     skip_whitespace
     move.b  (a0),d0
 
     ; Empty command - ignore
@@ -186,37 +180,36 @@ ParseCommand:
 
 .do_mem_byte:
     moveq   #0,d0                   ; Mode 0 = byte
-    bsr     CmdMemory
+    bsr     cmd_memory
     bra     .done
 
 .do_mem:
     moveq   #0,d0                   ; Mode 0 = byte
-    bsr     CmdMemory
+    bsr     cmd_memory
     bra     .done
 
 .do_mem_word:
     moveq   #1,d0                   ; Mode 1 = word
-    bsr     CmdMemory
+    bsr     cmd_memory
     bra     .done
 
 .do_mem_long:
     moveq   #2,d0                   ; Mode 2 = long
-    bsr     CmdMemory
+    bsr     cmd_memory
     bra     .done
 
 .do_regs:
-    bsr     CmdRegisters
+    bsr     cmd_registers
     bra     .done
 
 .do_go:
-    bsr     CmdGo
+    bsr     cmd_go
     bra     .done
 
 .do_help:
-    bsr     CmdHelp
+    bsr     cmd_help
 
 .done:
-    movem.l (sp)+,d0/a0
     rts
 
 .unknown:
@@ -224,32 +217,28 @@ ParseCommand:
     even
 
 ; ============================================================
-; SkipWhitespace - Advance A0 past spaces/tabs
+; skip_whitespace - Advance A0 past spaces/tabs
 ; ============================================================
 ; A0 = string pointer (modified)
-SkipWhitespace:
-    movem.l d0,-(sp)
+skip_whitespace:
 .loop:
     move.b  (a0),d0
     cmp.b   #' ',d0
     beq.s   .skip
     cmp.b   #9,d0                       ; Tab
     beq.s   .skip
-    bra.s   .done
+    rts
 .skip:
     addq.l  #1,a0
     bra.s   .loop
-.done:
-    movem.l (sp)+,d0
-    rts
 
 ; ============================================================
-; ParseHex - Parse hex string to D0.l
+; parse_hex - Parse hex string to D0.l
 ; ============================================================
 ; A0 = string pointer (advanced past hex digits)
 ; Returns D0.l = parsed value, D1.w = digit count, Z flag set if no digits found
-ParseHex:
-    movem.l d2-d3,-(sp)             ; Don't save D1 - used for return value
+parse_hex:
+    movem.l d2-d3,-(sp)
 
     moveq   #0,d0                       ; Result
     moveq   #0,d3                       ; Digit count
@@ -305,16 +294,16 @@ ParseHex:
     rts
 
 ; ============================================================
-; CmdRegisters - Display or modify registers
+; cmd_registers - Display or modify registers
 ; ============================================================
 ; Syntax: r             - Display all
 ;         r <reg> <val> - Set register
-CmdRegisters:
-    movem.l d0-d3/a0-a2,-(sp)
+cmd_registers:
+    movem.l d2-d3/a2,-(sp)
 
     lea     DBG_CMD_BUF,a0
     addq.l  #1,a0                       ; Skip 'r'
-    bsr     SkipWhitespace
+    bsr     skip_whitespace
 
     ; Check if register name follows
     move.b  (a0),d0
@@ -379,8 +368,8 @@ CmdRegisters:
 
 .parse_value:
     ; A1 now points to register storage
-    bsr     SkipWhitespace
-    bsr     ParseHex
+    bsr     skip_whitespace
+    bsr     parse_hex
     beq.s   .bad_value
 
     ; Store value (handle SR as word)
@@ -412,7 +401,7 @@ CmdRegisters:
     bsr     panic_serial_output
 
 .done:
-    movem.l (sp)+,d0-d3/a0-a2
+    movem.l (sp)+,d2-d3/a2
     rts
 
 .ok_msg:
@@ -424,7 +413,7 @@ CmdRegisters:
     even
 
 ; ============================================================
-; CmdMemory - Display or modify memory
+; cmd_memory - Display or modify memory
 ; ============================================================
 ; Syntax: m[.b] <addr>   - Dump 16 bytes
 ;         m.w <addr>     - Dump 8 words
@@ -432,8 +421,8 @@ CmdRegisters:
 ;         m <addr> <val> - Write byte/word/long
 ;         m              - Dump next 16 bytes
 ; D0.w = mode (0=byte, 1=word, 2=long)
-CmdMemory:
-    movem.l d0-d5/a0-a1,-(sp)
+cmd_memory:
+    movem.l d4-d5,-(sp)
 
     move.w  d0,d5                       ; Save mode (0=byte, 1=word, 2=long)
 
@@ -445,7 +434,7 @@ CmdMemory:
     bne.s   .skip_done
     addq.l  #2,a0                       ; Skip '.w' or '.l'
 .skip_done:
-    bsr     SkipWhitespace
+    bsr     skip_whitespace
 
     ; Check if address follows
     move.b  (a0),d0
@@ -457,7 +446,7 @@ CmdMemory:
     bra     .have_addr
 
 .parse_addr:
-    bsr     ParseHex
+    bsr     parse_hex
     beq     .bad_addr
 
 .have_addr:
@@ -466,12 +455,12 @@ CmdMemory:
     move.l  d0,a1                       ; Address to dump
 
     ; Check if value follows (write mode)
-    bsr     SkipWhitespace
+    bsr     skip_whitespace
     move.b  (a0),d0
     beq     .dump_mode
 
     ; Parse value
-    bsr     ParseHex
+    bsr     parse_hex
     beq     .bad_value
 
     ; Write based on digit count (D1 from ParseHex)
@@ -560,7 +549,7 @@ CmdMemory:
     bsr     SerialPutString
 
 .done:
-    movem.l (sp)+,d0-d5/a0-a1
+    movem.l (sp)+,d4-d5
     rts
 
 .ok_byte_msg:
@@ -578,23 +567,21 @@ CmdMemory:
     even
 
 ; ============================================================
-; CmdGo - Continue execution
+; cmd_go - Continue execution
 ; ============================================================
 ; Syntax: g       - Continue from saved PC
 ;         g <addr> - Continue from specified address
-CmdGo:
-    movem.l d0/a0,-(sp)
-
+cmd_go:
     lea     DBG_CMD_BUF,a0
     addq.l  #1,a0                       ; Skip 'g'
-    bsr     SkipWhitespace
+    bsr     skip_whitespace
 
     ; Check if address follows
     move.b  (a0),d0
     beq.s   .use_saved_pc
 
     ; Parse address
-    bsr     ParseHex
+    bsr     parse_hex
     beq.s   .bad_addr
 
     ; Update saved PC
@@ -618,7 +605,6 @@ CmdGo:
 .bad_addr:
     lea     .bad_addr_msg(pc),a0
     bsr     SerialPutString
-    movem.l (sp)+,d0/a0
     rts
 
 .msg:
@@ -628,15 +614,11 @@ CmdGo:
     even
 
 ; ============================================================
-; CmdHelp - Display command help
+; cmd_help - Display command help
 ; ============================================================
-CmdHelp:
-    movem.l a0,-(sp)
-
+cmd_help:
     lea     .help_text(pc),a0
     bsr     SerialPutString
-
-    movem.l (sp)+,a0
     rts
 
 .help_text:

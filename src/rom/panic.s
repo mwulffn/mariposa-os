@@ -61,7 +61,7 @@ panic:
     bsr     panic_serial_output
 
     ; Enter interactive debugger
-    jmp     DebuggerMain
+    jmp     debugger_main
 
 ; ============================================================
 ; panic_with_msg - Entry point preserving a message
