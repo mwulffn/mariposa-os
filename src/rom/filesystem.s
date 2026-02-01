@@ -192,8 +192,8 @@ FAT16Init:
 
     ; Read boot sector (LBA 0 of partition)
     lea     FS_BOOT_BUFFER,a0
-    moveq   #1,d2               ; 1 sector
-    ; d1 already contains partition LBA
+    move.l  FSV_PARTITION_LBA(a3),d0    ; LBA
+    moveq   #1,d1                       ; 1 sector
     bsr     IDERead
     tst.l   d0
     bne     .read_error
@@ -381,9 +381,9 @@ FAT16FindFile:
 .sector_loop:
     ; Read root directory sector
     lea     FS_DIR_BUFFER,a0
-    move.l  FSV_PARTITION_LBA(a3),d1
-    add.l   d6,d1                       ; LBA = partition + root_start + offset
-    moveq   #1,d2                       ; 1 sector
+    move.l  FSV_PARTITION_LBA(a3),d0
+    add.l   d6,d0                       ; LBA = partition + root_start + offset
+    moveq   #1,d1                       ; 1 sector
     bsr     IDERead
     tst.l   d0
     bne     .read_error
@@ -520,15 +520,15 @@ FAT16ReadCluster:
     move.b  FSV_SEC_PER_CLUS(a3),d0
     mulu    d0,d4               ; (cluster - 2) * sec_per_cluster
 
-    move.l  FSV_DATA_START_SEC(a3),d1
-    add.l   d4,d1               ; + data_start
+    move.l  FSV_DATA_START_SEC(a3),d0
+    add.l   d4,d0               ; + data_start
     move.l  FSV_PARTITION_LBA(a3),d4
-    add.l   d4,d1               ; + partition_lba
+    add.l   d4,d0               ; + partition_lba
 
     ; Read sectors
     move.l  a4,a0               ; destination
-    moveq   #0,d2
-    move.b  FSV_SEC_PER_CLUS(a3),d2     ; number of sectors
+    moveq   #0,d1
+    move.b  FSV_SEC_PER_CLUS(a3),d1     ; number of sectors
     bsr     IDERead
     tst.l   d0
     bne     .error
@@ -591,9 +591,9 @@ FAT16GetNextCluster:
 
     ; Read FAT sector
     move.l  d0,FSV_CACHED_FAT_SEC(a3)   ; update cache tag
-    move.l  d0,d1
+    ; d0 already contains LBA
     lea     FS_FAT_BUFFER,a0
-    moveq   #1,d2
+    moveq   #1,d1                       ; 1 sector
     bsr     IDERead
     tst.l   d0
     bne     .error
