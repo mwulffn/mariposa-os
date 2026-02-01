@@ -91,6 +91,11 @@ Start:
     ; ============================================================
     bsr     IDETestRead
 
+    ; ============================================================
+    ; 7. RDB DETECTION
+    ; ============================================================
+    bsr     FindRDB
+
     ; Enter interactive debugger
     jmp     DebuggerEntry
 
@@ -348,6 +353,7 @@ GenericExcMsg:
     include "sprintf.s"
     include "debugger.s"
     include "ide.s"
+    include "partition.s"
 
 ; ============================================================
 ; ROM footer - pad to 256KB and add checksum location

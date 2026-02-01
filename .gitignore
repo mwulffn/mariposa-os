@@ -2,3 +2,4 @@
 vasm
 build/*
 harddrives/*
+tools/*
