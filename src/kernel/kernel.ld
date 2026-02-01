@@ -5,6 +5,7 @@ SECTIONS {
 
     .text: {
         *(.text)
+        *(CODE)
     }
 
     .rodata: {
@@ -13,11 +14,13 @@ SECTIONS {
 
     .data: {
         *(.data)
+        *(DATA)
     }
 
     .bss: {
         __bss_start = .;
         *(.bss)
+        *(BSS)
         *(COMMON)
         __bss_end = .;
     }

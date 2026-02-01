@@ -91,14 +91,17 @@ Start:
     ; ============================================================
     bsr     FindRDB
     tst.l   d0
-    bne.s   .skip_partition         ; Skip if RDB not found
+    bne     .enter_debugger         ; Skip partition if RDB not found
 
     ; ============================================================
     ; 7. PARTITION LOADING
     ; ============================================================
     bsr     LoadPartition
+    tst.l   d0
+    bne     .enter_debugger         ; Go to debugger if error
+    ; On success: D1 = partition start LBA, D2 = partition size in blocks
 
-.skip_partition:
+.enter_debugger:
     ; Enter interactive debugger
     jmp     DebuggerEntry
 

@@ -178,14 +178,16 @@ FindRDB:
     even
 
 ; ============================================================
-; LoadPartition - Load and display first partition
+; LoadPartition - Load partition and return filesystem location
 ; ============================================================
-; Input:  None
+; Input:  RDB must be loaded in RDB_BUFFER (call FindRDB first)
 ; Output: D0.l = 0 success, -1 error
-; Preserves: D2-D7/A2-A6
+;         D1.l = Partition start LBA (if success)
+;         D2.l = Partition size in blocks (if success)
+; Preserves: D3-D7/A2-A6
 ; ============================================================
 LoadPartition:
-    movem.l d1-d7/a0-a6,-(sp)
+    movem.l d3-d7/a0-a6,-(sp)
 
     ; Read partition block 1
     pea     .msg_loading(pc)
@@ -306,7 +308,10 @@ LoadPartition:
     bsr     SerialPrintf
     addq.l  #8,sp
 
-    ; Success
+    ; Success - return values in D1 and D2
+    ; D2 already contains start LBA, D3 contains size
+    move.l  d2,d1                   ; D1 = partition start LBA
+    move.l  d3,d2                   ; D2 = partition size in blocks
     moveq   #0,d0
     bra.s   .exit
 
@@ -317,7 +322,7 @@ LoadPartition:
     moveq   #-1,d0
 
 .exit:
-    movem.l (sp)+,d1-d7/a0-a6
+    movem.l (sp)+,d3-d7/a0-a6
     rts
 
 ; Messages
