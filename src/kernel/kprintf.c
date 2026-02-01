@@ -2,22 +2,21 @@
  * kprintf.c - Kernel printf
  *
  * Minimal printf implementation for kernel use.
- * Supports: %d %i %u %x %X %p %s %c %% 
+ * Supports: %d %i %u %x %X %p %s %c %%
  *           %l variants (ld, lu, lx, lX)
  *           width, zero-pad, left-align
  */
 
 #include "kprintf.h"
 #include "serial.h"
+#include "stdarg.h"
+
+extern void (*rom_panic)(void);
+
 
 /* Default: show everything up to INFO */
 int kprintf_level = KL_INFO;
 
-/* stdarg.h replacement - vbcc style */
-typedef unsigned char *va_list;
-#define va_start(ap, last) ((ap) = (va_list)&(last) + sizeof(last))
-#define va_arg(ap, type)   (*(type *)((ap) += sizeof(type), (ap) - sizeof(type)))
-#define va_end(ap)         ((void)0)
 
 /* Output context */
 struct output {

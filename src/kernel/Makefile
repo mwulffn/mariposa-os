@@ -8,7 +8,7 @@ VLINK   = vlink
 # Flags
 VBCCFLAGS = -cpu=68000 -O=1
 VASMFLAGS = -m68000 -Felf -quiet
-VLINKFLAGS = -b rawbin1 -M
+VLINKFLAGS = -b rawbin1
 
 # Directories
 BUILD   = build
