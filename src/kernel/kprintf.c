@@ -53,15 +53,18 @@ static void out_pad(struct output *o, int count, char c)
         out_char(o, c);
 }
 
+/* Digit tables */
+static const char digits_lower[] = "0123456789abcdef";
+static const char digits_upper[] = "0123456789ABCDEF";
+
 /* Convert unsigned long to string, return length */
-static int ultoa(unsigned long val, char *buf, int base, int uppercase)
+int ultoa(unsigned long val, char *buf, unsigned long base, int uppercase)
 {
-    static const char digits_lower[] = "0123456789abcdef";
-    static const char digits_upper[] = "0123456789ABCDEF";
     const char *digits = uppercase ? digits_upper : digits_lower;
     char tmp[24];  /* Enough for 64-bit in binary */
     int i = 0;
     int len;
+    unsigned long digit;
 
     if (val == 0) {
         buf[0] = '0';
@@ -69,9 +72,27 @@ static int ultoa(unsigned long val, char *buf, int base, int uppercase)
         return 1;
     }
 
-    while (val) {
-        tmp[i++] = digits[val % base];
-        val /= base;
+    /* VBCC compiler bug workaround: modulo with parameter doesn't work correctly.
+     * Use hardcoded constants for common bases */
+    if (base == 16) {
+        while (val) {
+            digit = val & 0xF;  /* val % 16 using bitwise AND */
+            tmp[i++] = digits[digit];
+            val >>= 4;  /* val / 16 using shift */
+        }
+    } else if (base == 10) {
+        while (val) {
+            digit = val - (val / 10) * 10;  /* Manual modulo */
+            tmp[i++] = digits[digit];
+            val /= 10;
+        }
+    } else {
+        /* Fallback for other bases - may not work due to VBCC bug */
+        while (val) {
+            digit = val % base;
+            tmp[i++] = digits[digit];
+            val /= base;
+        }
     }
 
     len = i;

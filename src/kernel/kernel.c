@@ -16,25 +16,6 @@ extern char _bss_end;    /* Will become __bss_end in assembly */
 /* ROM panic function - set by crt0 */
 extern void (*rom_panic)(void);
 
-/* Direct test without variadic args */
-void test_direct_print(void *ptr)
-{
-    char buf[20];
-    unsigned long val = (unsigned long)ptr;
-    int i = 0;
-
-    /* Convert to hex manually */
-    ser_puts("Direct test: 0x");
-    for (i = 7; i >= 0; i--) {
-        int nibble = (val >> (i * 4)) & 0xF;
-        if (nibble < 10)
-            ser_putc('0' + nibble);
-        else
-            ser_putc('a' + (nibble - 10));
-    }
-    ser_puts("\n");
-}
-
 int test(int a, ...)
 {
     va_list ap;
@@ -86,10 +67,11 @@ void kernel_main(MemEntry *memmap)
 
 void test_pointers(void)
 {
-    kprintf(KL_INFO, "kernel_main = %p\n", kernel_main);
-    kprintf(KL_INFO, "&kernel_main = %p\n", &kernel_main);
+    pr_info("\nTesting kprintf with pointers:\n");
+    pr_info("kernel_main = %p\n", kernel_main);
+    pr_info("&kernel_main = %p\n", &kernel_main);
 
     void *p = (void *)0x200000;
-    kprintf(KL_INFO, "literal ptr = %p\n", p);
-    kprintf(KL_INFO, "ptr=%p next=%x\n", kernel_main, 0x12345678);
+    pr_info("literal ptr = %p\n", p);
+    pr_info("Two pointers: %p and %p\n", kernel_main, p);
 }
