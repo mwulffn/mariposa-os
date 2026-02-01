@@ -36,6 +36,7 @@ configure_zorro_ii:
     moveq   #0,d5               ; First memory card base
     moveq   #8,d4               ; Safety counter - max 8 cards
     moveq   #0,d6               ; Previous er_Type (detect repeated reads)
+    lea     ZORRO_BASE,a2       ; a2 = current autoconfig slot
 
 .next_card:
     ; Check safety counter
@@ -48,7 +49,7 @@ configure_zorro_ii:
     ; CYAN - Reading card
     move.w  #$0FF,COLOR00(a6)
 
-    lea     ZORRO_BASE,a2       ; a2 = ZORRO_BASE (preserve through calls!)
+    ; a2 already points to current slot (preserved through calls)
 
     ; Read er_Type (register 00)
     moveq   #0,d1               ; Register offset 0
@@ -128,6 +129,7 @@ configure_zorro_ii:
 
 .got_size:
     add.l   d2,d3               ; Advance allocation (d3 = next base)
+    add.l   #$10000,a2          ; Advance to next autoconfig slot
 
     bra   .next_card
 
@@ -140,7 +142,8 @@ configure_zorro_ii:
     lea     io_card_msg(pc),a0
     bsr     SerialPutString
     ; I/O card - just shut it up for now
-    move.b  #$FF,$4C(a2)        ; Write to shutup register (a2=ZORRO_BASE)
+    move.b  #$FF,$4C(a2)        ; Write to shutup register
+    add.l   #$10000,a2          ; Advance to next autoconfig slot
     bra   .next_card
 
 .no_card:
