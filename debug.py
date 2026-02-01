@@ -12,6 +12,8 @@ import threading
 import select
 import os
 import signal
+import tty
+import termios
 
 class AmigaDebugger:
     def __init__(self):
@@ -19,6 +21,7 @@ class AmigaDebugger:
         self.sock = None
         self.running = False
         self.reader_thread = None
+        self.prompt_ready = threading.Event()  # Signals when Amiga prompt is seen
 
     def start_emulator(self):
         """Start FS-UAE in the background"""
@@ -59,6 +62,7 @@ class AmigaDebugger:
     def read_serial_output(self):
         """Thread function to continuously read and display serial output"""
         self.sock.settimeout(0.1)
+        buffer = []  # Accumulate text to check for debugger banner
 
         while self.running:
             try:
@@ -67,6 +71,17 @@ class AmigaDebugger:
                     text = data.decode('ascii', errors='replace')
                     # Print without newline if it doesn't end with one
                     print(text, end='', flush=True)
+                    # Signal when we see the prompt after the debugger banner
+                    if not self.prompt_ready.is_set():
+                        buffer.append(text)
+                        combined = ''.join(buffer[-10:])  # Keep last 10 chunks to limit memory
+                        # Look for various prompt patterns
+                        # Debug: uncomment to see what we're looking for
+                        # if 'Debugger' in text:
+                        #     print(f"\n[DEBUG] Received: {repr(combined[-50:])}\n", flush=True)
+                        if ('> \n' in combined or combined.endswith('> ') or
+                            (combined.count('>') > 0 and combined.strip().endswith('>'))):
+                            self.prompt_ready.set()
                 else:
                     # Empty data means connection closed (FS-UAE quit)
                     if self.running:
@@ -80,6 +95,17 @@ class AmigaDebugger:
                     print(f"\n[Serial read error: {e}]")
                     self.running = False
                 break
+
+    def read_char(self):
+        """Read a single character in raw mode (no echo)"""
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            ch = sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        return ch
 
     def send_command(self, cmd):
         """Send a command to the debugger"""
@@ -99,8 +125,9 @@ class AmigaDebugger:
         self.reader_thread = threading.Thread(target=self.read_serial_output, daemon=True)
         self.reader_thread.start()
 
-        # Wait for initial banner
-        time.sleep(1)
+        # Wait for Amiga's initial prompt
+        if not self.prompt_ready.wait(timeout=10):
+            print("\n[WARNING] Amiga prompt not detected, continuing anyway...")
 
         print("\n" + "=" * 60)
         print("INTERACTIVE DEBUGGER SESSION")
@@ -118,7 +145,21 @@ class AmigaDebugger:
 
                     # Read command from user
                     if sys.stdin.isatty():
-                        cmd = input()
+                        # Build command character by character in raw mode
+                        cmd = []
+                        while True:
+                            ch = self.read_char()
+                            if ch in ('\r', '\n'):
+                                self.sock.sendall(b'\r')  # Send CR to trigger command
+                                break
+                            elif ch == '\x04':  # Ctrl-D
+                                raise EOFError
+                            elif ch == '\x03':  # Ctrl-C
+                                raise KeyboardInterrupt
+                            else:
+                                cmd.append(ch)
+                                self.sock.sendall(ch.encode())  # Send char immediately
+                        cmd = ''.join(cmd)
                     else:
                         cmd = sys.stdin.readline()
                         if not cmd:
@@ -130,8 +171,8 @@ class AmigaDebugger:
                         print("\nExiting debugger...")
                         break
 
-                    # Send command
-                    if cmd:
+                    # Send command (only for non-TTY mode, TTY already sent)
+                    if cmd and not sys.stdin.isatty():
                         self.send_command(cmd)
 
                     # Small delay to let output arrive
