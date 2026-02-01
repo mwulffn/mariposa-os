@@ -19,10 +19,10 @@
 ; Saves all registers and enters interactive debugger
 DebuggerEntry:
     ; Save registers to dump area
-    movem.l d0-d7/a0-a6,SavedRegs
-    move.l  sp,SavedA7
-    move.w  sr,SavedSR
-    move.l  #DebuggerEntry,SavedPC      ; Boot entry, not a crash
+    movem.l d0-d7/a0-a6,saved_regs
+    move.l  sp,saved_a7
+    move.w  sr,saved_sr
+    move.l  #DebuggerEntry,saved_pc      ; Boot entry, not a crash
 
     ; Fall through to DebuggerMain
 
@@ -36,7 +36,7 @@ DebuggerMain:
     clr.l   DBG_LAST_ADDR
 
     ; Set up display (already done by bootstrap, but safe to repeat)
-    bsr     PanicInitDisplay
+    bsr     init_display
 
     ; Print banner
     lea     .banner(pc),a0
@@ -340,7 +340,7 @@ CmdRegisters:
     ; D register - get address
     ext.w   d2
     lsl.w   #2,d2                       ; *4 for longword offset
-    lea     SavedD0,a1
+    lea     saved_d0,a1
     add.w   d2,a1
     bra.w   .parse_value
 
@@ -355,7 +355,7 @@ CmdRegisters:
     ; A register - get address
     ext.w   d2
     lsl.w   #2,d2
-    lea     SavedA0,a1
+    lea     saved_a0,a1
     add.w   d2,a1
     bra.w   .parse_value
 
@@ -365,7 +365,7 @@ CmdRegisters:
     bne.s   .check_sr
     cmp.b   #'C',d2
     bne.s   .bad_reg
-    lea     SavedPC,a1
+    lea     saved_pc,a1
     bra.w   .parse_value
 
 .check_sr:
@@ -374,7 +374,7 @@ CmdRegisters:
     bne.s   .bad_reg
     cmp.b   #'R',d2
     bne.s   .bad_reg
-    lea     SavedSR,a1
+    lea     saved_sr,a1
     bra.w   .parse_value
 
 .parse_value:
@@ -384,7 +384,7 @@ CmdRegisters:
     beq.s   .bad_value
 
     ; Store value (handle SR as word)
-    cmp.l   #SavedSR,a1
+    cmp.l   #saved_sr,a1
     beq.s   .store_sr
     move.l  d0,(a1)
     bra.s   .ok
@@ -409,7 +409,7 @@ CmdRegisters:
 
 .display_all:
     ; Use existing Panic serial output for register dump
-    bsr     PanicSerialOutput
+    bsr     panic_serial_output
 
 .done:
     movem.l (sp)+,d0-d3/a0-a2
@@ -598,7 +598,7 @@ CmdGo:
     beq.s   .bad_addr
 
     ; Update saved PC
-    move.l  d0,SavedPC
+    move.l  d0,saved_pc
 
 .use_saved_pc:
     lea     .msg(pc),a0
@@ -606,11 +606,11 @@ CmdGo:
 
     ; Restore registers and continue
     ; Build RTE frame on stack
-    move.l  SavedPC,-(sp)               ; PC
-    move.w  SavedSR,-(sp)               ; SR
+    move.l  saved_pc,-(sp)               ; PC
+    move.w  saved_sr,-(sp)               ; SR
 
     ; Restore all registers
-    movem.l SavedRegs,d0-d7/a0-a6
+    movem.l saved_regs,d0-d7/a0-a6
 
     ; Return from exception (continues execution)
     rte

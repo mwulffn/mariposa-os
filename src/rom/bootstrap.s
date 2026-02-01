@@ -6,7 +6,7 @@
 
     include "hardware.i"
 
-; Panic and PanicFont are defined in debug.s which is included at the end
+; Panic handler is defined in panic.s which is included at the end
 
 ; ============================================================
 ; ROM header
@@ -210,59 +210,59 @@ install_exception_vectors:
 ; ============================================================
 bus_error_handler:
     lea     bus_error_msg(pc),a0
-    jmp     PanicWithMsg
+    jmp     panic_with_msg
 
 address_error_handler:
     lea     addr_error_msg(pc),a0
-    jmp     PanicWithMsg
+    jmp     panic_with_msg
 
 illegal_handler:
     lea     illegal_msg(pc),a0
-    jmp     PanicWithMsg
+    jmp     panic_with_msg
 
 zero_divide_handler:
     lea     zero_div_msg(pc),a0
-    jmp     PanicWithMsg
+    jmp     panic_with_msg
 
 chk_handler:
     lea     chk_msg(pc),a0
-    jmp     PanicWithMsg
+    jmp     panic_with_msg
 
 trapv_handler:
     lea     trapv_msg(pc),a0
-    jmp     PanicWithMsg
+    jmp     panic_with_msg
 
 privilege_handler:
     lea     priv_msg(pc),a0
-    jmp     PanicWithMsg
+    jmp     panic_with_msg
 
 trace_handler:
     lea     trace_msg(pc),a0
-    jmp     PanicWithMsg
+    jmp     panic_with_msg
 
 line_a_handler:
     lea     line_a_msg(pc),a0
-    jmp     PanicWithMsg
+    jmp     panic_with_msg
 
 line_f_handler:
     lea     line_f_msg(pc),a0
-    jmp     PanicWithMsg
+    jmp     panic_with_msg
 
 spurious_handler:
     lea     spurious_msg(pc),a0
-    jmp     PanicWithMsg
+    jmp     panic_with_msg
 
 auto_vec_handler:
     lea     auto_vec_msg(pc),a0
-    jmp     PanicWithMsg
+    jmp     panic_with_msg
 
 trap_handler:
     lea     trap_msg(pc),a0
-    jmp     PanicWithMsg
+    jmp     panic_with_msg
 
 generic_handler:
     lea     generic_exc_msg(pc),a0
-    jmp     PanicWithMsg
+    jmp     panic_with_msg
 
 ; ============================================================
 ; init_display - Set up basic display for green screen
@@ -410,9 +410,9 @@ generic_exc_msg:
     even
 
 ; ============================================================
-; Include debug, autoconfig, memory, serial, sprintf, and debugger modules
+; Include panic, autoconfig, memory, serial, sprintf, and debugger modules
 ; ============================================================
-    include "debug.s"
+    include "panic.s"
     include "autoconfig.s"
     include "memory.s"
     include "serial.s"
