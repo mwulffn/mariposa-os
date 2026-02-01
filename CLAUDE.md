@@ -8,13 +8,16 @@ A bare-metal operating system for Amiga 500 (OCS, 68000, 512KB chip + 1MB fast R
 make          # Build both ROM and kernel
 make rom      # Build ROM only (outputs to src/rom/build/kick.rom)
 make kernel   # Build kernel only (outputs to src/kernel/build/SYSTEM.BIN)
-make run      # Build all and run in FS-UAE
+make deploy   # Build kernel and copy to hard drive image
+make run      # Build all, deploy kernel, and run in FS-UAE
 make clean    # Clean all build artifacts
 ```
 
-Requires: vasmm68k_mot (VASM with Motorola syntax), FS-UAE, vbcc (for kernel)
+Requires: vasmm68k_mot (VASM with Motorola syntax), FS-UAE, vbcc (for kernel), mtools (for deployment)
 
 **ROM assembler flags:** `-Fbin -m68000 -no-opt`
+
+**Kernel deployment:** The `deploy` target copies `SYSTEM.BIN` to the FAT16 filesystem on `harddrives/boot.hdf` using mtools. The `run` target automatically triggers deployment.
 
 **Switching configs:** Edit `CONFIG = configs/a600.fs-uae` in root Makefile to use a different config (e.g., `configs/a500.fs-uae`)
 

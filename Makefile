@@ -2,6 +2,7 @@
 
 # Configuration
 CONFIG = configs/a600.fs-uae
+HDD = harddrives/boot.hdf
 
 # Sub-project directories
 ROM_DIR = src/rom
@@ -11,7 +12,7 @@ KERNEL_DIR = src/kernel
 ROM = $(ROM_DIR)/build/kick.rom
 KERNEL = $(KERNEL_DIR)/build/SYSTEM.BIN
 
-.PHONY: all rom kernel run run-open clean
+.PHONY: all rom kernel deploy run run-open clean
 
 all: rom kernel
 
@@ -21,11 +22,17 @@ rom:
 kernel:
 	$(MAKE) -C $(KERNEL_DIR)
 
-run: all
+deploy: kernel
+	@echo "Deploying kernel to hard drive image..."
+	mcopy -i $(HDD) -o $(KERNEL) ::SYSTEM.BIN
+	@echo "Kernel deployed successfully"
+	@mdir -i $(HDD) ::
+
+run: rom deploy
 	/Applications/FS-UAE.app/Contents/MacOS/fs-uae "$(PWD)/$(CONFIG)"
 
 # Alternative: use macOS open command (doesn't pass args reliably)
-run-open: all
+run-open: rom deploy
 	open -a "FS-UAE" --args "$(PWD)/$(CONFIG)"
 
 clean:
