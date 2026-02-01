@@ -129,12 +129,6 @@ class AmigaDebugger:
         if not self.prompt_ready.wait(timeout=10):
             print("\n[WARNING] Amiga prompt not detected, continuing anyway...")
 
-        print("\n" + "=" * 60)
-        print("INTERACTIVE DEBUGGER SESSION")
-        print("=" * 60)
-        print("Type '?' for help, 'quit' or Ctrl-D to exit")
-        print("=" * 60 + "\n")
-
         try:
             while self.running:
                 try:

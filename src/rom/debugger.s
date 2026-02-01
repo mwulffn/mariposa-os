@@ -57,7 +57,8 @@ DebuggerMain:
     bra.s   .cmd_loop
 
 .banner:
-    dc.b    10,13,"AMAG Debugger v0.1",10,13,0
+    dc.b    10,13,"AMAG Debugger v0.1",10,13
+    dc.b    "Type '?' for help",10,13,0
 .prompt:
     dc.b    10,13,"> ",0
     even
