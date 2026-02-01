@@ -14,6 +14,8 @@ Requires: vasmm68k_mot (VASM with Motorola syntax), FS-UAE
 
 Assembler flags: `-Fbin -m68000 -no-opt -I$(SRCDIR)`
 
+**Switching configs:** Edit `CONFIG = configs/a500.fs-uae` in Makefile to use a different config (e.g., `configs/a600.fs-uae`)
+
 ## Project Structure
 
 ```
@@ -27,6 +29,9 @@ src/rom/
 docs/
   rom_design.md - ROM architecture
   debugger.md   - Debugger guide
+configs/
+  a500.fs-uae   - Amiga 500 FS-UAE configuration
+  a600.fs-uae   - Amiga 600 FS-UAE configuration
 build/
   kick.rom      - Compiled ROM (256KB)
 debug.py        - Interactive debugger launcher

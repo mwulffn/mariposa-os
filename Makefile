@@ -1,5 +1,8 @@
 # Amiga bare-metal development Makefile
 
+# Configuration - change this to switch between configs
+CONFIG = configs/a600.fs-uae
+
 ASM = vasmm68k_mot
 AFLAGS = -Fbin -m68000 -no-opt -I$(SRCDIR)
 
@@ -23,11 +26,11 @@ $(ROM): $(SRCS) $(INCS) | $(BUILDDIR)
 	@echo "ROM size: $$(wc -c < $@) bytes"
 
 run: $(ROM)
-	/Applications/FS-UAE.app/Contents/MacOS/fs-uae "$(PWD)/a500.fs-uae"
+	/Applications/FS-UAE.app/Contents/MacOS/fs-uae "$(PWD)/$(CONFIG)"
 
 # Alternative: use macOS open command (doesn't pass args reliably)
 run-open: $(ROM)
-	open -a "FS-UAE" --args "$(PWD)/a500.fs-uae"
+	open -a "FS-UAE" --args "$(PWD)/$(CONFIG)"
 
 clean:
 	rm -rf $(BUILDDIR)
