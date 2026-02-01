@@ -158,7 +158,7 @@ TestChipRAM:
 .test_fail:
     move.w  #$FF0,COLOR00(a1)
     lea     MemTestFailMsg(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
 .halt:
     bra.s   .halt
 

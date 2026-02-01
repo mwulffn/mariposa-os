@@ -7,51 +7,53 @@
 ; ============================================================
 
 ; ============================================================
-; SerialInit - Initialize serial port
+; serial_init - Initialize serial port
 ; ============================================================
-; No parameters, modifies A6 only
-SerialInit:
+; No parameters, preserves all registers
+serial_init:
+    movem.l a6,-(sp)
     lea     CUSTOM,a6
     move.w  #$0170,SERPER(a6)       ; 9600 baud (368 decimal)
+    movem.l (sp)+,a6
     rts
 
 ; ============================================================
-; SerialPutChar - Send single character
+; serial_put_char - Send single character
 ; ============================================================
 ; D0.b = character to send
-; Modifies: A6
-SerialPutChar:
-    movem.l d0/a6,-(sp)
+; Preserves all registers except D0 (scratch)
+serial_put_char:
+    movem.l a6,-(sp)
     lea     CUSTOM,a6
 .wait:
     btst    #SERDATR_TBE,SERDATR(a6)    ; Wait for TBE
     beq.s   .wait
     move.w  d0,SERDAT(a6)               ; Send character
-    movem.l (sp)+,d0/a6
+    movem.l (sp)+,a6
     rts
 
 ; ============================================================
-; SerialPutString - Send null-terminated string
+; serial_put_string - Send null-terminated string
 ; ============================================================
 ; A0 = pointer to string
-; Modifies: D0, A0 (preserved), A6
-SerialPutString:
-    movem.l d0/a0/a6,-(sp)
+; Preserves all registers except D0, A0 (scratch)
+serial_put_string:
+    movem.l a6,-(sp)
 .loop:
     move.b  (a0)+,d0
     beq.s   .done
-    bsr     SerialPutChar
+    bsr     serial_put_char
     bra.s   .loop
 .done:
-    movem.l (sp)+,d0/a0/a6
+    movem.l (sp)+,a6
     rts
 
 ; ============================================================
-; SerialGetChar - Non-blocking read
+; serial_get_char - Non-blocking read
 ; ============================================================
 ; Returns character in D0.b if available, 0 with Z flag if not
-; Modifies: D0, A6
-SerialGetChar:
+; Preserves all registers except D0 (return value)
+serial_get_char:
     movem.l a6,-(sp)
     lea     CUSTOM,a6
     btst    #SERDATR_RBF,SERDATR(a6)    ; Check receive buffer full
@@ -66,11 +68,11 @@ SerialGetChar:
     rts
 
 ; ============================================================
-; SerialWaitChar - Blocking read
+; serial_wait_char - Blocking read
 ; ============================================================
 ; Returns character in D0.b when available
-; Modifies: D0, A6
-SerialWaitChar:
+; Preserves all registers except D0 (return value)
+serial_wait_char:
     movem.l a6,-(sp)
     lea     CUSTOM,a6
 .wait:
@@ -82,12 +84,12 @@ SerialWaitChar:
     rts
 
 ; ============================================================
-; SerialPutHex8 - Print byte as 2 hex digits
+; serial_put_hex8 - Print byte as 2 hex digits
 ; ============================================================
 ; D0.b = value to print
-; Modifies: D0-D2, A6
-SerialPutHex8:
-    movem.l d0-d2,-(sp)
+; Preserves all registers except D0, D1 (scratch)
+serial_put_hex8:
+    movem.l d2,-(sp)
 
     move.b  d0,d2                       ; Save value
 
@@ -101,7 +103,7 @@ SerialPutHex8:
 .digit1:
     add.b   #'0',d0
 .send1:
-    bsr     SerialPutChar
+    bsr     serial_put_char
 
     ; Low nibble
     move.b  d2,d0
@@ -113,35 +115,31 @@ SerialPutHex8:
 .digit2:
     add.b   #'0',d0
 .send2:
-    bsr     SerialPutChar
+    bsr     serial_put_char
 
-    movem.l (sp)+,d0-d2
+    movem.l (sp)+,d2
     rts
 
 ; ============================================================
-; SerialPutHex16 - Print word as 4 hex digits
+; serial_put_hex16 - Print word as 4 hex digits
 ; ============================================================
 ; D0.w = value to print
-; Modifies: D0-D1, A6
-SerialPutHex16:
-    movem.l d0-d1,-(sp)
-
+; Preserves all registers except D0, D1 (scratch)
+serial_put_hex16:
     move.w  d0,d1                   ; Save value
     lsr.w   #8,d0                   ; Get high byte
-    bsr     SerialPutHex8
+    bsr     serial_put_hex8
     move.b  d1,d0                   ; Get low byte
-    bsr     SerialPutHex8
-
-    movem.l (sp)+,d0-d1
+    bsr     serial_put_hex8
     rts
 
 ; ============================================================
-; SerialPutHex32 - Print 32-bit hex value (8 digits, no prefix)
+; serial_put_hex32 - Print 32-bit hex value (8 digits, no prefix)
 ; ============================================================
 ; D0.l = value to print
-; Modifies: D0-D2, A0, A6
-SerialPutHex32:
-    movem.l d0-d2/a0,-(sp)
+; Preserves all registers except D0, D1, A0 (scratch)
+serial_put_hex32:
+    movem.l d2,-(sp)
     lea     SPRINTF_BUFFER,a0
 
     moveq   #7,d2               ; 8 hex digits
@@ -161,18 +159,18 @@ SerialPutHex32:
 
     clr.b   (a0)                ; Null terminate
     lea     SPRINTF_BUFFER,a0
-    bsr     SerialPutString
+    bsr     serial_put_string
 
-    movem.l (sp)+,d0-d2/a0
+    movem.l (sp)+,d2
     rts
 
 ; ============================================================
-; SerialPutDecimal - Print decimal number
+; serial_put_decimal - Print decimal number
 ; ============================================================
 ; D0.l = number to print
-; Modifies: D0-D2, A0-A2, A6
-SerialPutDecimal:
-    movem.l d0-d2/a0-a2,-(sp)
+; Preserves all registers except D0, D1, A0, A1 (scratch)
+serial_put_decimal:
+    movem.l d2/a2,-(sp)
 
     lea     SPRINTF_BUFFER,a0
     move.l  a0,a1           ; Save start position
@@ -213,7 +211,7 @@ SerialPutDecimal:
 .terminate:
     clr.b   (a0)            ; Null terminate
     move.l  a1,a0
-    bsr     SerialPutString
+    bsr     serial_put_string
 
-    movem.l (sp)+,d0-d2/a0-a2
+    movem.l (sp)+,d2/a2
     rts

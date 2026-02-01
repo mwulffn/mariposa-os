@@ -64,11 +64,11 @@ start:
     ; ============================================================
     ; 4. SERIAL INIT
     ; ============================================================
-    bsr     SerialInit
+    bsr     serial_init
 
     ; Print version banner
     lea     banner_msg(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
 
     ; Print memory map table
     bsr     PrintMemoryMap
@@ -84,7 +84,7 @@ start:
 
     ; Print success message to serial
     lea     success_msg(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
 
     ; ============================================================
     ; 6. RDB DETECTION

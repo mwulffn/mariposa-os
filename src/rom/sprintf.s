@@ -297,8 +297,8 @@ FormatBinToBuffer:
 ; SerialPrintf - Format and print to serial port
 ; ============================================================
 ; Stack layout same as Sprintf
-; Convenience wrapper: calls Sprintf then SerialPutString
+; Convenience wrapper: calls Sprintf then serial_put_string
 SerialPrintf:
     bsr     Sprintf
-    bsr     SerialPutString
+    bsr     serial_put_string
     rts

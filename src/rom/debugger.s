@@ -40,12 +40,12 @@ debugger_main:
 
     ; Print banner
     lea     .banner(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
 
     ; Print prompt and enter command loop
 .cmd_loop:
     lea     .prompt(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
 
     ; Read command line
     bsr     dbg_read_line
@@ -73,7 +73,7 @@ dbg_read_line:
     moveq   #0,d1                       ; Buffer index
 
 .loop:
-    bsr     SerialWaitChar              ; Get character in d0
+    bsr     serial_wait_char              ; Get character in d0
 
     ; Check for Enter (CR or LF)
     cmp.b   #13,d0
@@ -96,7 +96,7 @@ dbg_read_line:
     addq.w  #1,d1
 
     ; Echo character
-    bsr     SerialPutChar
+    bsr     serial_put_char
     bra.s   .loop
 
 .backspace:
@@ -109,11 +109,11 @@ dbg_read_line:
 
     ; Echo backspace sequence: BS, space, BS
     move.b  #8,d0
-    bsr     SerialPutChar
+    bsr     serial_put_char
     move.b  #' ',d0
-    bsr     SerialPutChar
+    bsr     serial_put_char
     move.b  #8,d0
-    bsr     SerialPutChar
+    bsr     serial_put_char
     bra.s   .loop
 
 .done:
@@ -156,7 +156,7 @@ parse_command:
 
     ; Unknown command
     lea     .unknown(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     bra     .done
 
 .check_mem_mode:
@@ -383,17 +383,17 @@ cmd_registers:
 
 .ok:
     lea     .ok_msg(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     bra.s   .done
 
 .bad_reg:
     lea     .bad_reg_msg(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     bra.s   .done
 
 .bad_value:
     lea     .bad_val_msg(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     bra.s   .done
 
 .display_all:
@@ -484,7 +484,7 @@ cmd_memory:
     lea     .ok_byte_msg(pc),a0
 
 .write_ok:
-    bsr     SerialPutString
+    bsr     serial_put_string
     bra     .done
 
 .dump_mode:
@@ -492,12 +492,12 @@ cmd_memory:
     move.l  a1,d0
     move.l  d0,-(sp)
     move.b  #'$',d0
-    bsr     SerialPutChar
+    bsr     serial_put_char
     move.l  (sp)+,d0
-    bsr     SerialPutHex32
+    bsr     serial_put_hex32
 
     lea     .colon(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
 
     ; Branch based on mode
     tst.w   d5
@@ -511,9 +511,9 @@ cmd_memory:
     moveq   #15,d4
 .dump_byte_loop:
     move.b  #' ',d0
-    bsr     SerialPutChar
+    bsr     serial_put_char
     move.b  (a1)+,d0
-    bsr     SerialPutHex8
+    bsr     serial_put_hex8
     dbf     d4,.dump_byte_loop
     bra     .done
 
@@ -522,9 +522,9 @@ cmd_memory:
     moveq   #7,d4
 .dump_word_loop:
     move.b  #' ',d0
-    bsr     SerialPutChar
+    bsr     serial_put_char
     move.w  (a1)+,d0
-    bsr     SerialPutHex16
+    bsr     serial_put_hex16
     dbf     d4,.dump_word_loop
     bra     .done
 
@@ -533,20 +533,20 @@ cmd_memory:
     moveq   #3,d4
 .dump_long_loop:
     move.b  #' ',d0
-    bsr     SerialPutChar
+    bsr     serial_put_char
     move.l  (a1)+,d0
-    bsr     SerialPutHex32
+    bsr     serial_put_hex32
     dbf     d4,.dump_long_loop
     bra     .done
 
 .bad_addr:
     lea     .bad_addr_msg(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     bra     .done
 
 .bad_value:
     lea     .bad_val_msg(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
 
 .done:
     movem.l (sp)+,d4-d5
@@ -589,7 +589,7 @@ cmd_go:
 
 .use_saved_pc:
     lea     .msg(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
 
     ; Restore registers and continue
     ; Build RTE frame on stack
@@ -604,7 +604,7 @@ cmd_go:
 
 .bad_addr:
     lea     .bad_addr_msg(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     rts
 
 .msg:
@@ -618,7 +618,7 @@ cmd_go:
 ; ============================================================
 cmd_help:
     lea     .help_text(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     rts
 
 .help_text:

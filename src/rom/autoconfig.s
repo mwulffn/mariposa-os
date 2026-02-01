@@ -30,7 +30,7 @@ configure_zorro_ii:
 
     ; Print entry message
     lea     autoconfig_start_msg(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
 
     move.l  #$200000,d3         ; Next allocation address
     moveq   #0,d5               ; First memory card base
@@ -42,7 +42,7 @@ configure_zorro_ii:
     ; Check safety counter
     dbf     d4,.check_card
     lea     max_cards_msg(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     bra   .done
 
 .check_card:
@@ -89,7 +89,7 @@ configure_zorro_ii:
     move.w  #$FF0,COLOR00(a6)
 
     lea     memory_card_msg(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
 
     ; Memory card - allocate at current address
     tst.l   d5
@@ -140,7 +140,7 @@ configure_zorro_ii:
     ; RED - I/O card found
     move.w  #$F00,COLOR00(a6)
     lea     io_card_msg(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     ; I/O card - just shut it up for now
     move.b  #$FF,$4C(a2)        ; Write to shutup register
     add.l   #$10000,a2          ; Advance to next autoconfig slot
@@ -148,7 +148,7 @@ configure_zorro_ii:
 
 .no_card:
     lea     no_card_msg(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
 
 .done:
     ; BLUE - Autoconfig done

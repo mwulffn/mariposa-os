@@ -81,104 +81,104 @@ panic_serial_output:
 
     ; Send header
     lea     .header(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
 
     ; Send all data registers (D0-D7)
     lea     .lblD0(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     move.l  saved_d0,d0
-    bsr     SerialPutHex32
+    bsr     serial_put_hex32
 
     lea     .lblD1(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     move.l  saved_d1,d0
-    bsr     SerialPutHex32
+    bsr     serial_put_hex32
 
     lea     .lblD2(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     move.l  saved_d2,d0
-    bsr     SerialPutHex32
+    bsr     serial_put_hex32
 
     lea     .lblD3(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     move.l  saved_d3,d0
-    bsr     SerialPutHex32
+    bsr     serial_put_hex32
     bsr     .crlf
 
     lea     .lblD4(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     move.l  saved_d4,d0
-    bsr     SerialPutHex32
+    bsr     serial_put_hex32
 
     lea     .lblD5(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     move.l  saved_d5,d0
-    bsr     SerialPutHex32
+    bsr     serial_put_hex32
 
     lea     .lblD6(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     move.l  saved_d6,d0
-    bsr     SerialPutHex32
+    bsr     serial_put_hex32
 
     lea     .lblD7(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     move.l  saved_d7,d0
-    bsr     SerialPutHex32
+    bsr     serial_put_hex32
     bsr     .crlf
 
     ; Send all address registers (A0-A7)
     lea     .lblA0(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     move.l  saved_a0,d0
-    bsr     SerialPutHex32
+    bsr     serial_put_hex32
 
     lea     .lblA1(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     move.l  saved_a1,d0
-    bsr     SerialPutHex32
+    bsr     serial_put_hex32
 
     lea     .lblA2(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     move.l  saved_a2,d0
-    bsr     SerialPutHex32
+    bsr     serial_put_hex32
 
     lea     .lblA3(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     move.l  saved_a3,d0
-    bsr     SerialPutHex32
+    bsr     serial_put_hex32
     bsr     .crlf
 
     lea     .lblA4(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     move.l  saved_a4,d0
-    bsr     SerialPutHex32
+    bsr     serial_put_hex32
 
     lea     .lblA5(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     move.l  saved_a5,d0
-    bsr     SerialPutHex32
+    bsr     serial_put_hex32
 
     lea     .lblA6(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     move.l  saved_a6,d0
-    bsr     SerialPutHex32
+    bsr     serial_put_hex32
 
     lea     .lblA7(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     move.l  saved_a7,d0
-    bsr     SerialPutHex32
+    bsr     serial_put_hex32
     bsr     .crlf
 
     ; Send PC and SR
     lea     .lblPC(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     move.l  saved_pc,d0
-    bsr     SerialPutHex32
+    bsr     serial_put_hex32
 
     lea     .lblSR(pc),a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     move.w  saved_sr,d0
-    bsr     SerialPutHex16
+    bsr     serial_put_hex16
     bsr     .crlf
 
     ; Send custom message if present
@@ -186,7 +186,7 @@ panic_serial_output:
     beq.s   .done
     bsr     .crlf
     move.l  d0,a0
-    bsr     SerialPutString
+    bsr     serial_put_string
     bsr     .crlf
 
 .done:
@@ -195,9 +195,9 @@ panic_serial_output:
 
 .crlf:
     move.b  #10,d0
-    bsr     SerialPutChar
+    bsr     serial_put_char
     move.b  #13,d0
-    bsr     SerialPutChar
+    bsr     serial_put_char
     rts
 
 .header:
