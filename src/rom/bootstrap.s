@@ -13,9 +13,9 @@
 ; ============================================================
     org $FC0000
 
-RomStart:
+rom_start:
     dc.l    $3FFC               ; Offset 0: Initial SSP (temporary boot stack)
-    dc.l    Start               ; Offset 4: Initial PC
+    dc.l    start               ; Offset 4: Initial PC
     dc.l    ROM_MAGIC           ; Offset 8: Magic 'AMAG'
     dc.w    ROM_VERSION         ; Offset 12: Version 0.1
     dc.w    ROM_FLAGS           ; Offset 14: Flags
@@ -23,7 +23,7 @@ RomStart:
 ; ============================================================
 ; Entry point
 ; ============================================================
-Start:
+start:
     ; ============================================================
     ; 1. HARDWARE INIT
     ; ============================================================
@@ -53,7 +53,7 @@ Start:
     ; ============================================================
     ; 2. EXCEPTION VECTOR INSTALLATION
     ; ============================================================
-    bsr     InstallExceptionVectors
+    bsr     install_exception_vectors
 
     ; ============================================================
     ; 3. MEMORY DETECTION
@@ -67,7 +67,7 @@ Start:
     bsr     SerialInit
 
     ; Print version banner
-    lea     BannerMsg(pc),a0
+    lea     banner_msg(pc),a0
     bsr     SerialPutString
 
     ; Print memory map table
@@ -77,13 +77,13 @@ Start:
     ; 5. SUCCESS HALT - BRIGHT GREEN SCREEN
     ; ============================================================
     ; Set up display
-    bsr     InitDisplay
+    bsr     init_display
 
     ; Set COLOR00 to bright green
     move.w  #$0F0,COLOR00(a6)
 
     ; Print success message to serial
-    lea     SuccessMsg(pc),a0
+    lea     success_msg(pc),a0
     bsr     SerialPutString
 
     ; ============================================================
@@ -113,7 +113,7 @@ Start:
     ; ============================================================
     ; 9. JUMP TO KERNEL
     ; ============================================================
-    pea     BootKernelMsg(pc)
+    pea     boot_kernel_msg(pc)
     bsr     SerialPrintf
     addq.l  #4,sp
 
@@ -149,7 +149,7 @@ Start:
     jmp     KERNEL_LOAD_ADDR
 
 .no_fast_found:
-    pea     NoFastRAMMsg(pc)
+    pea     no_fast_ram_msg(pc)
     bsr     SerialPrintf
     addq.l  #4,sp
 
@@ -158,46 +158,46 @@ Start:
     jmp     DebuggerEntry
 
 ; ============================================================
-; InstallExceptionVectors - Install all exception handlers
+; install_exception_vectors - Install all exception handlers
 ; ============================================================
-InstallExceptionVectors:
+install_exception_vectors:
     movem.l a0-a1,-(sp)
 
     ; Install specific exception handlers
-    move.l  #BusErrorHandler,VEC_BUS_ERROR
-    move.l  #AddressErrorHandler,VEC_ADDR_ERROR
-    move.l  #IllegalHandler,VEC_ILLEGAL
-    move.l  #ZeroDivideHandler,VEC_ZERO_DIV
-    move.l  #CHKHandler,VEC_CHK
-    move.l  #TRAPVHandler,VEC_TRAPV
-    move.l  #PrivilegeHandler,VEC_PRIV_VIOL
-    move.l  #TraceHandler,VEC_TRACE
-    move.l  #LineAHandler,VEC_LINE_A
-    move.l  #LineFHandler,VEC_LINE_F
-    move.l  #SpuriousHandler,VEC_SPURIOUS
+    move.l  #bus_error_handler,VEC_BUS_ERROR
+    move.l  #address_error_handler,VEC_ADDR_ERROR
+    move.l  #illegal_handler,VEC_ILLEGAL
+    move.l  #zero_divide_handler,VEC_ZERO_DIV
+    move.l  #chk_handler,VEC_CHK
+    move.l  #trapv_handler,VEC_TRAPV
+    move.l  #privilege_handler,VEC_PRIV_VIOL
+    move.l  #trace_handler,VEC_TRACE
+    move.l  #line_a_handler,VEC_LINE_A
+    move.l  #line_f_handler,VEC_LINE_F
+    move.l  #spurious_handler,VEC_SPURIOUS
 
     ; Install autovector handlers (IRQ 1-7)
-    move.l  #AutoVecHandler,VEC_AUTOVEC1
-    move.l  #AutoVecHandler,VEC_AUTOVEC2
-    move.l  #AutoVecHandler,VEC_AUTOVEC3
-    move.l  #AutoVecHandler,VEC_AUTOVEC4
-    move.l  #AutoVecHandler,VEC_AUTOVEC5
-    move.l  #AutoVecHandler,VEC_AUTOVEC6
-    move.l  #AutoVecHandler,VEC_AUTOVEC7
+    move.l  #auto_vec_handler,VEC_AUTOVEC1
+    move.l  #auto_vec_handler,VEC_AUTOVEC2
+    move.l  #auto_vec_handler,VEC_AUTOVEC3
+    move.l  #auto_vec_handler,VEC_AUTOVEC4
+    move.l  #auto_vec_handler,VEC_AUTOVEC5
+    move.l  #auto_vec_handler,VEC_AUTOVEC6
+    move.l  #auto_vec_handler,VEC_AUTOVEC7
 
     ; Install TRAP handlers (0-15)
     movem.l d0,-(sp)
     lea     VEC_TRAP0,a0
     moveq   #15,d0
 .trap_loop:
-    move.l  #TrapHandler,(a0)+
+    move.l  #trap_handler,(a0)+
     dbf     d0,.trap_loop
 
     ; Install generic handler for remaining vectors
     lea     $0030,a0            ; Start after reserved vectors
     move.w  #(256-12-1),d0      ; Remaining vectors
 .generic_loop:
-    move.l  #GenericHandler,(a0)+
+    move.l  #generic_handler,(a0)+
     dbf     d0,.generic_loop
 
     movem.l (sp)+,d0
@@ -208,66 +208,66 @@ InstallExceptionVectors:
 ; ============================================================
 ; Exception Handlers
 ; ============================================================
-BusErrorHandler:
-    lea     BusErrorMsg(pc),a0
+bus_error_handler:
+    lea     bus_error_msg(pc),a0
     jmp     PanicWithMsg
 
-AddressErrorHandler:
-    lea     AddrErrorMsg(pc),a0
+address_error_handler:
+    lea     addr_error_msg(pc),a0
     jmp     PanicWithMsg
 
-IllegalHandler:
-    lea     IllegalMsg(pc),a0
+illegal_handler:
+    lea     illegal_msg(pc),a0
     jmp     PanicWithMsg
 
-ZeroDivideHandler:
-    lea     ZeroDivMsg(pc),a0
+zero_divide_handler:
+    lea     zero_div_msg(pc),a0
     jmp     PanicWithMsg
 
-CHKHandler:
-    lea     CHKMsg(pc),a0
+chk_handler:
+    lea     chk_msg(pc),a0
     jmp     PanicWithMsg
 
-TRAPVHandler:
-    lea     TRAPVMsg(pc),a0
+trapv_handler:
+    lea     trapv_msg(pc),a0
     jmp     PanicWithMsg
 
-PrivilegeHandler:
-    lea     PrivMsg(pc),a0
+privilege_handler:
+    lea     priv_msg(pc),a0
     jmp     PanicWithMsg
 
-TraceHandler:
-    lea     TraceMsg(pc),a0
+trace_handler:
+    lea     trace_msg(pc),a0
     jmp     PanicWithMsg
 
-LineAHandler:
-    lea     LineAMsg(pc),a0
+line_a_handler:
+    lea     line_a_msg(pc),a0
     jmp     PanicWithMsg
 
-LineFHandler:
-    lea     LineFMsg(pc),a0
+line_f_handler:
+    lea     line_f_msg(pc),a0
     jmp     PanicWithMsg
 
-SpuriousHandler:
-    lea     SpuriousMsg(pc),a0
+spurious_handler:
+    lea     spurious_msg(pc),a0
     jmp     PanicWithMsg
 
-AutoVecHandler:
-    lea     AutoVecMsg(pc),a0
+auto_vec_handler:
+    lea     auto_vec_msg(pc),a0
     jmp     PanicWithMsg
 
-TrapHandler:
-    lea     TrapMsg(pc),a0
+trap_handler:
+    lea     trap_msg(pc),a0
     jmp     PanicWithMsg
 
-GenericHandler:
-    lea     GenericExcMsg(pc),a0
+generic_handler:
+    lea     generic_exc_msg(pc),a0
     jmp     PanicWithMsg
 
 ; ============================================================
-; InitDisplay - Set up basic display for green screen
+; init_display - Set up basic display for green screen
 ; ============================================================
-InitDisplay:
+init_display:
     movem.l d0/a0/a6,-(sp)
     lea     CUSTOM,a6
 
@@ -298,7 +298,7 @@ InitDisplay:
     move.w  d0,BPL1PTH(a6)
 
     ; Set up copper list
-    bsr     InitCopper
+    bsr     init_copper
 
     ; Start copper
     move.l  #COPPERLIST,d0
@@ -314,9 +314,9 @@ InitDisplay:
     rts
 
 ; ============================================================
-; InitCopper - Build copper list
+; init_copper - Build copper list
 ; ============================================================
-InitCopper:
+init_copper:
     movem.l a0,-(sp)
     lea     COPPERLIST,a0
 
@@ -333,79 +333,79 @@ InitCopper:
 ; ============================================================
 ; Data
 ; ============================================================
-BannerMsg:
+banner_msg:
     dc.b    "AMAG ROM v0.1",10,13,0
     even
 
-NewlineMsg:
+newline_msg:
     dc.b    10,13,0
     even
 
-SuccessMsg:
+success_msg:
     dc.b    "Boot success - GREEN SCREEN",10,13,0
     even
 
-BootKernelMsg:
+boot_kernel_msg:
     dc.b    "Jumping to kernel at $200000...",10,13,0
     even
 
-NoFastRAMMsg:
+no_fast_ram_msg:
     dc.b    "ERROR: No fast RAM in memory table!",10,13,0
     even
 
-BusErrorMsg:
+bus_error_msg:
     dc.b    "BUS ERROR",0
     even
 
-AddrErrorMsg:
+addr_error_msg:
     dc.b    "ADDRESS ERROR",0
     even
 
-IllegalMsg:
+illegal_msg:
     dc.b    "ILLEGAL INSTRUCTION",0
     even
 
-ZeroDivMsg:
+zero_div_msg:
     dc.b    "DIVIDE BY ZERO",0
     even
 
-CHKMsg:
+chk_msg:
     dc.b    "CHK EXCEPTION",0
     even
 
-TRAPVMsg:
+trapv_msg:
     dc.b    "TRAPV EXCEPTION",0
     even
 
-PrivMsg:
+priv_msg:
     dc.b    "PRIVILEGE VIOLATION",0
     even
 
-TraceMsg:
+trace_msg:
     dc.b    "TRACE EXCEPTION",0
     even
 
-LineAMsg:
+line_a_msg:
     dc.b    "LINE-A EXCEPTION",0
     even
 
-LineFMsg:
+line_f_msg:
     dc.b    "LINE-F EXCEPTION",0
     even
 
-SpuriousMsg:
+spurious_msg:
     dc.b    "SPURIOUS INTERRUPT",0
     even
 
-AutoVecMsg:
+auto_vec_msg:
     dc.b    "AUTOVECTOR INTERRUPT",0
     even
 
-TrapMsg:
+trap_msg:
     dc.b    "TRAP EXCEPTION",0
     even
 
-GenericExcMsg:
+generic_exc_msg:
     dc.b    "UNKNOWN EXCEPTION",0
     even
 
@@ -426,7 +426,7 @@ GenericExcMsg:
 ; ROM footer - pad to 256KB and add checksum location
 ; ============================================================
     org $FFFFFC
-RomEnd:
-    dc.l    RomStart
+rom_end:
+    dc.l    rom_start
 
     end
