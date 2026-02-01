@@ -18,7 +18,7 @@ ntsc_mode = 0
 warp_mode_key = 0x57
 window_height = 568
 window_width = 720
-kickstart_file = build/kick.rom
+kickstart_file = src/rom/build/kick.rom
 
 # Serial Port - Debug output via TCP
 # Connect with: nc localhost 5555

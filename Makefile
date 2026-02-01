@@ -1,36 +1,33 @@
-# Amiga bare-metal development Makefile
+# Amiga Project - Main Makefile
 
-# Configuration - change this to switch between configs
+# Configuration
 CONFIG = configs/a600.fs-uae
 
-ASM = vasmm68k_mot
-AFLAGS = -Fbin -m68000 -no-opt -I$(SRCDIR)
+# Sub-project directories
+ROM_DIR = src/rom
+KERNEL_DIR = src/kernel
 
-SRCDIR = src/rom
-BUILDDIR = build
+# Build artifacts (for run target)
+ROM = $(ROM_DIR)/build/kick.rom
+KERNEL = $(KERNEL_DIR)/build/SYSTEM.BIN
 
-ROM = $(BUILDDIR)/kick.rom
-SRCS = $(wildcard $(SRCDIR)/*.s)
-INCS = $(wildcard $(SRCDIR)/*.i)
+.PHONY: all rom kernel run run-open clean
 
-.PHONY: all run clean
+all: rom kernel
 
-all: $(ROM)
+rom:
+	$(MAKE) -C $(ROM_DIR)
 
-$(BUILDDIR):
-	mkdir -p $(BUILDDIR)
+kernel:
+	$(MAKE) -C $(KERNEL_DIR)
 
-# Main ROM build - bootstrap.s includes other modules
-$(ROM): $(SRCS) $(INCS) | $(BUILDDIR)
-	$(ASM) $(AFLAGS) -o $@ $(SRCDIR)/bootstrap.s
-	@echo "ROM size: $$(wc -c < $@) bytes"
-
-run: $(ROM)
+run: all
 	/Applications/FS-UAE.app/Contents/MacOS/fs-uae "$(PWD)/$(CONFIG)"
 
 # Alternative: use macOS open command (doesn't pass args reliably)
-run-open: $(ROM)
+run-open: all
 	open -a "FS-UAE" --args "$(PWD)/$(CONFIG)"
 
 clean:
-	rm -rf $(BUILDDIR)
+	$(MAKE) -C $(ROM_DIR) clean
+	$(MAKE) -C $(KERNEL_DIR) clean

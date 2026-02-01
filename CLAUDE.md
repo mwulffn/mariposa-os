@@ -5,37 +5,50 @@ A bare-metal operating system for Amiga 500 (OCS, 68000, 512KB chip + 1MB fast R
 ## Build
 
 ```bash
-make          # Build ROM (outputs to build/kick.rom)
-make run      # Run in FS-UAE
-make run-direct   # Direct FS-UAE launch (if 'open' doesn't work)
+make          # Build both ROM and kernel
+make rom      # Build ROM only (outputs to src/rom/build/kick.rom)
+make kernel   # Build kernel only (outputs to src/kernel/build/SYSTEM.BIN)
+make run      # Build all and run in FS-UAE
+make clean    # Clean all build artifacts
 ```
 
-Requires: vasmm68k_mot (VASM with Motorola syntax), FS-UAE
+Requires: vasmm68k_mot (VASM with Motorola syntax), FS-UAE, vbcc (for kernel)
 
-Assembler flags: `-Fbin -m68000 -no-opt -I$(SRCDIR)`
+**ROM assembler flags:** `-Fbin -m68000 -no-opt`
 
-**Switching configs:** Edit `CONFIG = configs/a500.fs-uae` in Makefile to use a different config (e.g., `configs/a600.fs-uae`)
+**Switching configs:** Edit `CONFIG = configs/a600.fs-uae` in root Makefile to use a different config (e.g., `configs/a500.fs-uae`)
+
+**Standalone builds:**
+```bash
+cd src/rom && make      # Build ROM independently
+cd src/kernel && make   # Build kernel independently
+```
 
 ## Project Structure
 
 ```
+Makefile                      - Main build orchestrator
 src/rom/
-  bootstrap.s   - ROM entry point, memory detection, enters debugger
-  debug.s       - Panic handler with register dump
-  serial.s      - Serial port I/O (input and output)
-  debugger.s    - Interactive debugger (~630 lines)
-  hardware.i    - Hardware definitions
-  memory.s      - Memory detection and management
+  Makefile                    - ROM build
+  bootstrap.s                 - ROM entry point, memory detection, enters debugger
+  debug.s                     - Panic handler with register dump
+  serial.s                    - Serial port I/O (input and output)
+  debugger.s                  - Interactive debugger (~630 lines)
+  hardware.i                  - Hardware definitions
+  memory.s                    - Memory detection and management
+  build/kick.rom              - Compiled ROM (256KB)
+src/kernel/
+  Makefile                    - Kernel build
+  kernel.c                    - Kernel entry point
+  build/SYSTEM.BIN            - Compiled kernel binary
 docs/
-  rom_design.md - ROM architecture
-  debugger.md   - Debugger guide
+  rom_design.md               - ROM architecture
+  debugger.md                 - Debugger guide
 configs/
-  a500.fs-uae   - Amiga 500 FS-UAE configuration
-  a600.fs-uae   - Amiga 600 FS-UAE configuration
-build/
-  kick.rom      - Compiled ROM (256KB)
-debug.py        - Interactive debugger launcher
-test_*.py       - Test scripts
+  a500.fs-uae                 - Amiga 500 FS-UAE configuration
+  a600.fs-uae                 - Amiga 600 FS-UAE configuration
+debug.py                      - Interactive debugger launcher
+test_*.py                     - Test scripts
 ```
 
 ## Documentation

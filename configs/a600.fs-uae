@@ -18,7 +18,7 @@ ntsc_mode = 0
 warp_mode_key = 0x57
 window_height = 568
 window_width = 720
-kickstart_file = build/kick.rom
+kickstart_file = src/rom/build/kick.rom
 
 hard_drive_0 = harddrives/boot.hdf
 hard_drive_0_controller = ide0

@@ -17,7 +17,7 @@ BUILD   = build
 TARGET  = $(BUILD)/SYSTEM.BIN
 
 # Sources
-ASRC    = crt0.s
+ASRC    = crt0.s libsup.s
 CSRC    = kernel.c mem.c serial.c kprintf.c
 
 # Objects
