@@ -59,7 +59,7 @@ start:
     ; 3. MEMORY DETECTION
     ; ============================================================
     bsr     configure_zorro_ii  ; Must be first (for fast RAM)
-    bsr     BuildMemoryTable    ; Detects, tests, builds table
+    bsr     build_memory_table  ; Detects, tests, builds table
 
     ; ============================================================
     ; 4. SERIAL INIT
@@ -71,7 +71,7 @@ start:
     bsr     serial_put_string
 
     ; Print memory map table
-    bsr     PrintMemoryMap
+    bsr     print_memory_map
 
     ; ============================================================
     ; 5. SUCCESS HALT - BRIGHT GREEN SCREEN
@@ -89,14 +89,14 @@ start:
     ; ============================================================
     ; 6. RDB DETECTION
     ; ============================================================
-    bsr     FindRDB
+    bsr     find_rdb
     tst.l   d0
     bne     .enter_debugger         ; Skip partition if RDB not found
 
     ; ============================================================
     ; 7. PARTITION LOADING
     ; ============================================================
-    bsr     LoadPartition
+    bsr     load_partition
     tst.l   d0
     bne     .enter_debugger         ; Go to debugger if error
     ; On success: D1 = partition start LBA, D2 = partition size in blocks
@@ -105,7 +105,7 @@ start:
     ; 8. LOAD SYSTEM.BIN FROM PARTITION
     ; ============================================================
     ; D1 = partition start LBA, D2 = partition size
-    bsr     LoadSystemBin
+    bsr     load_system_bin
     tst.l   d0
     bne     .enter_debugger         ; Go to debugger if error
     ; On success: D1 = file size, kernel loaded at $200000

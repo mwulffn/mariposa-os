@@ -46,7 +46,7 @@ FSV_DATA_START_SEC  equ 20          ; long
 FSV_CACHED_FAT_SEC  equ 24          ; long (-1 if none)
 
 ; ============================================================================
-; LoadSystemBin - Main entry point
+; load_system_bin - Main entry point
 ; ============================================================================
 ; Input:
 ;   D1.l = partition start LBA
@@ -55,7 +55,7 @@ FSV_CACHED_FAT_SEC  equ 24          ; long (-1 if none)
 ;   D0.l = 0 on success, -1 on error
 ;   D1.l = file size in bytes (on success)
 ; ============================================================================
-LoadSystemBin:
+load_system_bin:
     movem.l d2-d7/a0-a6,-(sp)
 
     ; Print entry message
@@ -64,13 +64,13 @@ LoadSystemBin:
     addq.l  #4,sp
 
     ; Initialize filesystem
-    bsr     FAT16Init
+    bsr     fat16_init
     tst.l   d0
     bne     .error
 
     ; Search for SYSTEM.BIN
     lea     .filename(pc),a0
-    bsr     FAT16FindFile
+    bsr     fat16_find_file
     tst.l   d0
     bne     .error
 
@@ -92,7 +92,7 @@ LoadSystemBin:
     ; Read current cluster
     move.l  a2,a0               ; destination
     move.l  d3,d0               ; cluster number
-    bsr     FAT16ReadCluster
+    bsr     fat16_read_cluster
     tst.l   d0
     bne     .error
 
@@ -110,7 +110,7 @@ LoadSystemBin:
 
     ; Get next cluster
     move.l  d3,d0
-    bsr     FAT16GetNextCluster
+    bsr     fat16_get_next_cluster
     tst.l   d0
     bmi     .error
 
@@ -167,7 +167,7 @@ LoadSystemBin:
     even
 
 ; ============================================================================
-; FAT16Init - Parse boot sector and initialize filesystem
+; fat16_init - Parse boot sector and initialize filesystem
 ; ============================================================================
 ; Input:
 ;   D1.l = partition start LBA
@@ -175,7 +175,7 @@ LoadSystemBin:
 ; Output:
 ;   D0.l = 0 on success, -1 on error
 ; ============================================================================
-FAT16Init:
+fat16_init:
     movem.l d1-d7/a0-a6,-(sp)
 
     pea     .msg_init(pc)
@@ -353,7 +353,7 @@ FAT16Init:
     even
 
 ; ============================================================================
-; FAT16FindFile - Search root directory for a file
+; fat16_find_file - Search root directory for a file
 ; ============================================================================
 ; Input:
 ;   A0 = pointer to 11-byte filename (e.g., "SYSTEM  BIN")
@@ -362,7 +362,7 @@ FAT16Init:
 ;   D1.l = starting cluster (on success)
 ;   D2.l = file size in bytes (on success)
 ; ============================================================================
-FAT16FindFile:
+fat16_find_file:
     movem.l d3-d7/a0-a6,-(sp)
 
     move.l  a0,a4               ; save filename pointer
@@ -496,7 +496,7 @@ FAT16FindFile:
     even
 
 ; ============================================================================
-; FAT16ReadCluster - Read a cluster to memory
+; fat16_read_cluster - Read a cluster to memory
 ; ============================================================================
 ; Input:
 ;   A0 = destination buffer
@@ -504,7 +504,7 @@ FAT16FindFile:
 ; Output:
 ;   D0.l = 0 on success, -1 on error
 ; ============================================================================
-FAT16ReadCluster:
+fat16_read_cluster:
     movem.l d1-d7/a0-a6,-(sp)
 
     move.l  a0,a4               ; save destination
@@ -549,14 +549,14 @@ FAT16ReadCluster:
     even
 
 ; ============================================================================
-; FAT16GetNextCluster - Get next cluster from FAT chain
+; fat16_get_next_cluster - Get next cluster from FAT chain
 ; ============================================================================
 ; Input:
 ;   D0.l = current cluster number
 ; Output:
 ;   D0.l = next cluster number (or -1 on error)
 ; ============================================================================
-FAT16GetNextCluster:
+fat16_get_next_cluster:
     movem.l d1-d7/a0-a6,-(sp)
 
     move.l  d0,d4               ; save cluster number

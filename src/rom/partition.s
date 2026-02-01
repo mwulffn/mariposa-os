@@ -55,13 +55,13 @@ DE_BOOTPRI      equ 60              ; Boot priority
 DE_DOSTYPE      equ 64              ; Filesystem type
 
 ; ============================================================
-; FindRDB - Scan for Rigid Disk Block
+; find_rdb - Scan for Rigid Disk Block
 ; ============================================================
 ; Input:  None
 ; Output: D0.l = 0 success (RDB found), -1 error (no RDB)
 ; Preserves: D2-D7/A2-A6
 ; ============================================================
-FindRDB:
+find_rdb:
     movem.l d1-d7/a0-a6,-(sp)
 
     ; Print start message
@@ -178,15 +178,15 @@ FindRDB:
     even
 
 ; ============================================================
-; LoadPartition - Load partition and return filesystem location
+; load_partition - Load partition and return filesystem location
 ; ============================================================
-; Input:  RDB must be loaded in RDB_BUFFER (call FindRDB first)
+; Input:  RDB must be loaded in RDB_BUFFER (call find_rdb first)
 ; Output: D0.l = 0 success, -1 error
 ;         D1.l = Partition start LBA (if success)
 ;         D2.l = Partition size in blocks (if success)
 ; Preserves: D3-D7/A2-A6
 ; ============================================================
-LoadPartition:
+load_partition:
     movem.l d3-d7/a0-a6,-(sp)
 
     ; Read partition block 1

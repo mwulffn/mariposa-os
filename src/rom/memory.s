@@ -10,13 +10,13 @@
 ; hardware.i already included by bootstrap.s
 
 ; ============================================================
-; DetectChipRAM - Detect chip RAM size
+; detect_chip_ram - Detect chip RAM size
 ; Returns: d0.l = chip RAM size in bytes
 ; ============================================================
 ; Tests at specific boundaries: 2MB, 1MB, 512KB
 ; Uses mirroring detection to avoid false positives
 ; ============================================================
-DetectChipRAM:
+detect_chip_ram:
     movem.l d1-d3/a0-a1,-(sp)
 
     ; Test for 2MB (ECS max)
@@ -81,12 +81,12 @@ DetectChipRAM:
     rts
 
 ; ============================================================
-; DetectFastRAM - Detect fast RAM (Zorro expansion)
+; detect_fast_ram - Detect fast RAM (Zorro expansion)
 ; Returns: d0.l = fast RAM size in bytes (0 if none)
 ; ============================================================
 ; Probes $200000 for Zorro II RAM (must call configure_zorro_ii first!)
 ; ============================================================
-DetectFastRAM:
+detect_fast_ram:
     movem.l d1-d3/a0,-(sp)
     move.l  #$AA55AA55,d1
 
@@ -125,13 +125,13 @@ DetectFastRAM:
     rts
 
 ; ============================================================
-; TestChipRAM - Quick test of chip RAM
+; test_chip_ram - Quick test of chip RAM
 ; ============================================================
 ; Input: d2.l = chip RAM size limit
 ; On failure: sets COLOR00=$FF0 (yellow) and halts (does not return)
 ; On success: returns normally
 ; ============================================================
-TestChipRAM:
+test_chip_ram:
     movem.l d0/d3/a0-a1,-(sp)
     lea     CUSTOM,a1
     move.l  #$4000,a0           ; Start after reserved area
@@ -163,11 +163,11 @@ TestChipRAM:
     bra.s   .halt
 
 ; ============================================================
-; BuildMemoryTable - Detect memory, build table, test chip RAM
+; build_memory_table - Detect memory, build table, test chip RAM
 ; ============================================================
 ; On failure: sets COLOR00=$FF0 (yellow) and halts
 ; ============================================================
-BuildMemoryTable:
+build_memory_table:
     movem.l d0-d3/a0-a1,-(sp)
     lea     MEMMAP_TABLE,a0
 
@@ -178,7 +178,7 @@ BuildMemoryTable:
     move.w  #$0001,(a0)+        ; DMA capable
 
     ; Detect and add chip RAM entry
-    bsr     DetectChipRAM       ; d0 = size
+    bsr     detect_chip_ram     ; d0 = size
     move.l  d0,d2               ; Save total chip size for test
     move.l  #KERNEL_CHIP,(a0)+  ; Base
     move.l  d0,d1
@@ -188,13 +188,13 @@ BuildMemoryTable:
     move.w  #$0001,(a0)+        ; DMA capable
 
     ; Test chip RAM before continuing (d2 = chip RAM size limit)
-    bsr     TestChipRAM
+    bsr     test_chip_ram
 
     ; Restore a0 to continue building table
     lea     MEMMAP_TABLE+24,a0  ; After 2 entries (12 bytes each)
 
     ; Detect and add fast RAM entry (if any)
-    bsr     DetectFastRAM       ; d0 = size
+    bsr     detect_fast_ram     ; d0 = size
     tst.l   d0
     beq.s   .no_fast
     move.l  #$200000,(a0)+      ; Base (Zorro II)
@@ -219,12 +219,12 @@ BuildMemoryTable:
     rts
 
 ; ============================================================
-; PrintMemoryMap - Output memory map table to serial port
+; print_memory_map - Output memory map table to serial port
 ; ============================================================
 ; Reads the memory map table and formats each entry for display
 ; Entry format: 12 bytes (base, size, type, flags)
 ; ============================================================
-PrintMemoryMap:
+print_memory_map:
     movem.l d0-d5/a0-a2,-(sp)
 
     ; Print header
