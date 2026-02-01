@@ -11,8 +11,7 @@ FS_FAT_BUFFER       equ $22200      ; FAT sector cache (512 bytes)
 FS_DIR_BUFFER       equ $22400      ; Directory sector buffer (512 bytes)
 FS_VARS             equ $23000      ; Filesystem variables
 
-; Target address for kernel
-KERNEL_LOAD_ADDR    equ $200000
+; Target address for kernel is defined in hardware.i
 
 ; BPB offsets (little-endian fields in boot sector)
 BPB_BYTES_PER_SEC   equ 11          ; word

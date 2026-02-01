@@ -184,7 +184,7 @@ BuildMemoryTable:
     move.l  d0,d1
     sub.l   #KERNEL_CHIP,d1
     move.l  d1,(a0)+            ; Size (total - reserved)
-    move.w  #MEM_TYPE_FREE,(a0)+
+    move.w  #MEM_TYPE_CHIP,(a0)+
     move.w  #$0001,(a0)+        ; DMA capable
 
     ; Test chip RAM before continuing (d2 = chip RAM size limit)
@@ -199,7 +199,7 @@ BuildMemoryTable:
     beq.s   .no_fast
     move.l  #$200000,(a0)+      ; Base (Zorro II)
     move.l  d0,(a0)+            ; Size
-    move.w  #MEM_TYPE_FREE,(a0)+
+    move.w  #MEM_TYPE_FAST,(a0)+
     move.w  #$0000,(a0)+        ; Not DMA capable
 
 .no_fast:
@@ -261,12 +261,24 @@ PrintMemoryMap:
     lsr.l   #2,d5           ; /4 more = /1024 total
 
     ; Get type string pointer
-    lea     .type_reserved(pc),a2
+    lea     .type_unknown(pc),a2
     cmp.w   #MEM_TYPE_RESERVED,d2
-    beq.s   .got_type
-    lea     .type_free(pc),a2
-    cmp.w   #MEM_TYPE_FREE,d2
-    beq.s   .got_type
+    bne.s   .check_chip
+    lea     .type_reserved(pc),a2
+    bra.s   .got_type
+.check_chip:
+    cmp.w   #MEM_TYPE_CHIP,d2
+    bne.s   .check_fast
+    lea     .type_chip(pc),a2
+    bra.s   .got_type
+.check_fast:
+    cmp.w   #MEM_TYPE_FAST,d2
+    bne.s   .check_rom
+    lea     .type_fast(pc),a2
+    bra.s   .got_type
+.check_rom:
+    cmp.w   #MEM_TYPE_ROM,d2
+    bne.s   .got_type
     lea     .type_rom(pc),a2
 
 .got_type:
@@ -308,10 +320,14 @@ PrintMemoryMap:
     dc.b    10,13,0
 .type_reserved:
     dc.b    "Reserved",0
-.type_free:
-    dc.b    "Free",0
+.type_chip:
+    dc.b    "Chip",0
+.type_fast:
+    dc.b    "Fast",0
 .type_rom:
     dc.b    "ROM",0
+.type_unknown:
+    dc.b    "???",0
     even
 
 ; ============================================================

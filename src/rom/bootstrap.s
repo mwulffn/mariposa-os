@@ -110,6 +110,49 @@ Start:
     bne     .enter_debugger         ; Go to debugger if error
     ; On success: D1 = file size, kernel loaded at $200000
 
+    ; ============================================================
+    ; 9. JUMP TO KERNEL
+    ; ============================================================
+    pea     BootKernelMsg(pc)
+    bsr     SerialPrintf
+    addq.l  #4,sp
+
+    ; Find fast RAM in memory table to get stack pointer
+    lea     MEMMAP_TABLE,a2
+.find_fast:
+    move.l  (a2)+,d2            ; base
+    move.l  (a2)+,d3            ; size
+    move.w  (a2)+,d4            ; type
+    addq.l  #2,a2               ; skip flags
+
+    ; Check for end of table (both base AND size are 0)
+    move.l  d2,d0
+    or.l    d3,d0
+    beq.s   .no_fast_found
+
+    cmp.w   #MEM_TYPE_FAST,d4
+    bne.s   .find_fast
+
+    ; Fast RAM found: stack = base + size
+    add.l   d2,d3
+
+    ; Set kernel entry parameters:
+    ; A0 = memory map pointer
+    lea     MEMMAP_TABLE,a0
+    ; A1 = ROM panic handler
+    lea     DebuggerEntry(pc),a1
+    ; SR = supervisor, interrupts disabled
+    move.w  #$2700,sr
+    ; SP = top of fast RAM
+    move.l  d3,sp
+    ; Jump to kernel
+    jmp     KERNEL_LOAD_ADDR
+
+.no_fast_found:
+    pea     NoFastRAMMsg(pc)
+    bsr     SerialPrintf
+    addq.l  #4,sp
+
 .enter_debugger:
     ; Enter interactive debugger
     jmp     DebuggerEntry
@@ -300,6 +343,14 @@ NewlineMsg:
 
 SuccessMsg:
     dc.b    "Boot success - GREEN SCREEN",10,13,0
+    even
+
+BootKernelMsg:
+    dc.b    "Jumping to kernel at $200000...",10,13,0
+    even
+
+NoFastRAMMsg:
+    dc.b    "ERROR: No fast RAM in memory table!",10,13,0
     even
 
 BusErrorMsg:

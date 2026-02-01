@@ -161,6 +161,7 @@ SCREEN          equ $000A50         ; Display bitplane (10KB)
 MEMMAP_TABLE    equ $003250         ; Memory map (432 bytes)
 SPRINTF_BUFFER  equ $003400         ; Sprintf output buffer (256 bytes)
 KERNEL_CHIP     equ $004000         ; Kernel-managed chip RAM start
+KERNEL_LOAD_ADDR equ $200000        ; Where SYSTEM.BIN is loaded
 
 ; ============================================================
 ; ROM identification
@@ -172,10 +173,11 @@ ROM_FLAGS       equ $0000           ; No flags
 ; ============================================================
 ; Memory map types
 ; ============================================================
-MEM_TYPE_FREE   equ 1               ; Available RAM
-MEM_TYPE_ROM    equ 2               ; Read-only memory
-MEM_TYPE_RESERVED equ 3             ; Reserved (vectors, ROM data)
-MEM_TYPE_END    equ 0               ; Table terminator
+MEM_TYPE_END      equ 0             ; Table terminator
+MEM_TYPE_CHIP     equ 1             ; Chip RAM (DMA capable)
+MEM_TYPE_FAST     equ 2             ; Fast RAM (CPU only)
+MEM_TYPE_ROM      equ 5             ; Read-only memory
+MEM_TYPE_RESERVED equ 6             ; Reserved (vectors, ROM data)
 
 ; ============================================================
 ; Display constants
