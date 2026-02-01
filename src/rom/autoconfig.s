@@ -32,7 +32,7 @@ ConfigureZorroII:
     bsr     SerialPutString
 
     move.l  #$200000,d3         ; Next allocation address
-    moveq   #0,d0               ; First memory card base
+    moveq   #0,d5               ; First memory card base
     moveq   #8,d4               ; Safety counter - max 8 cards
     moveq   #0,d6               ; Previous er_Type (detect repeated reads)
 
@@ -50,11 +50,9 @@ ConfigureZorroII:
     lea     ZORRO_BASE,a2       ; a2 = ZORRO_BASE (preserve through calls!)
 
     ; Read er_Type (register 00)
-    move.l  d0,-(sp)            ; Save d0 (return value)
     moveq   #0,d1               ; Register offset 0
     bsr     ReadZorroReg
     move.b  d0,d1               ; d1 = er_Type
-    move.l  (sp)+,d0            ; Restore d0 (return value)
 
     ; Check for no card (register 00 is NOT inverted, $FF = no card)
     cmp.b   #$FF,d1
@@ -75,13 +73,11 @@ ConfigureZorroII:
     move.b  d1,-(sp)            ; Push er_Type on stack
 
     ; Read er_Flags (register 08)
-    move.l  d0,-(sp)            ; Save d0 (return value)
     moveq   #8,d1               ; Register offset 8
     bsr     ReadZorroReg
     ; Registers except 00 are inverted
     eor.b   #$FF,d0             ; Invert to get logical value
     move.b  d0,d2               ; d2 = er_Flags
-    move.l  (sp)+,d0            ; Restore d0 (return value)
 
     ; Check if memory board (bit 7)
     btst    #7,d2
@@ -94,18 +90,16 @@ ConfigureZorroII:
     bsr     SerialPutString
 
     ; Memory card - allocate at current address
-    tst.l   d0
+    tst.l   d5
     bne.s   .not_first
-    move.l  d3,d0               ; Save first memory base
+    move.l  d3,d5               ; Save first memory base
 
 .not_first:
     ; Print base address
-    move.l  d0,-(sp)            ; Save d0 (return value)
     move.l  d3,-(sp)            ; Push address value
     pea     AllocatingAtFmt(pc)
     bsr     SerialPrintf
     addq.l  #8,sp               ; Clean up stack (format + 1 arg)
-    move.l  (sp)+,d0            ; Restore d0 (return value)
 
     ; Write base address to card
     move.l  d3,d0               ; d0 = base address
@@ -157,13 +151,12 @@ ConfigureZorroII:
     move.w  #$00F,COLOR00(a1)
 
     ; Print completion message
-    move.l  d0,-(sp)            ; Save d0 (return value)
-    move.l  d0,-(sp)            ; Push first RAM base address
+    move.l  d5,-(sp)            ; Push first RAM base address
     pea     AutoconfigDoneFmt(pc)
     bsr     SerialPrintf
     addq.l  #8,sp               ; Clean up stack (format + 1 arg)
-    move.l  (sp)+,d0            ; Restore d0 (return value)
 
+    move.l  d5,d0               ; Return first RAM base in d0
     movem.l (sp)+,d1-d6/a0-a2
     rts
 
