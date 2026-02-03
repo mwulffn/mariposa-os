@@ -57,7 +57,7 @@
    - Divide by zero
    - CHK, TRAPV
    - Privilege violation
-   - All handlers → debugger with context
+   - All handlers â†’ debugger with context
 
 7. **ROM Services**
    - Panic: dump registers, enter debugger
@@ -110,6 +110,7 @@ On any exception:
    - Run Zorro II autoconfig (relocate expansion cards)
    - Size chip RAM (512KB, 1MB, 2MB) with mirror detection
    - Size fast RAM at $200000
+   - Reserve top 8KB of fast RAM for kernel stack ($9FE000-$9FFFFF)
    - Quick test (optional, skippable)
    - Build memory map table at $3250
    
@@ -126,10 +127,10 @@ On any exception:
 6. Transfer to kernel
    - A0 = pointer to memory map ($3250)
    - A1 = ROM debugger entry point
-   - SSP = top of fast RAM ($A00000 for 8MB at $200000)
+   - SSP = top of kernel stack ($A00000, 8KB reserved at $9FE000-$9FFFFF)
    - Jump to $200000
    
-On failure at any step → enter debugger with error message
+On failure at any step â†’ enter debugger with error message
 ```
 
 ## Debugger Commands (Planned)
@@ -216,7 +217,7 @@ Expansion cards (including RAM) must be configured before they appear at their f
 
 ```
 1. Check er_Type at $E80000
-2. If $FF or $00 → no more cards, done
+2. If $FF or $00 â†’ no more cards, done
 3. Read size from er_Type bits 3-0
 4. Allocate base address (start at $200000 for RAM)
 5. Write base address high byte to $E80048
@@ -238,7 +239,7 @@ Expansion cards (including RAM) must be configured before they appear at their f
 - 28-bit LBA addressing
 - PIO mode (no DMA needed for boot)
 - Read sectors only (write not needed in ROM)
-- Timeout: ~2 seconds per operation. On timeout → enter debugger with error.
+- Timeout: ~2 seconds per operation. On timeout â†’ enter debugger with error.
 
 ## FAT16 Support
 
@@ -268,7 +269,7 @@ When ROM jumps to kernel, the following state is guaranteed:
 |----------|-------|
 | A0 | Pointer to memory map ($3250) |
 | A1 | ROM debugger entry point (Panic) |
-| A7/SSP | Top of fast RAM ($A00000 for 8MB) |
+| A7/SSP | Top of kernel stack ($A00000, 8KB reserved at $9FE000) |
 | SR | Supervisor mode, interrupts disabled ($2700) |
 | PC | $200000 |
 
@@ -283,11 +284,11 @@ Kernel can call ROM debugger at any time via `jsr (a1)`.
 
 ## Debugger Display
 
-- PAL timing: 320×256
+- PAL timing: 320Ã—256
 - 1 bitplane (2 colors)
 - Background: $008 (dark blue)
 - Foreground: $FFF (white)
-- Font: 8×8 pixels, 40 columns × 32 rows
+- Font: 8Ã—8 pixels, 40 columns Ã— 32 rows
 
 ## Error Handling
 
@@ -300,7 +301,7 @@ ROM displays human-readable errors before entering debugger:
 - Memory test failures (fast RAM)
 - Invalid kernel (future: bad magic/checksum)
 
-All errors halt at debugger prompt — never silent hang, never auto-reboot.
+All errors halt at debugger prompt â€” never silent hang, never auto-reboot.
 
 **Exception: Chip RAM failure**
 
@@ -322,12 +323,12 @@ This is the only case where ROM halts without debugger.
 
 ## Design Principles
 
-1. **ROM is bootstrap, not runtime** — Load kernel to fast RAM, run from there
-2. **Debugger is essential** — Invest in good debugging; it accelerates everything else
-3. **Fail safe** — Any error → debugger, never silent hang
-4. **Trust nothing on crash** — Dedicated stack, fixed memory locations
-5. **Keep it simple** — IDE not SCSI, FAT16 not FFS, polling not interrupts (for ROM)
-6. **68000 has 24-bit address bus** — Maximum address is $FFFFFF. Do not probe above this.
+1. **ROM is bootstrap, not runtime** â€” Load kernel to fast RAM, run from there
+2. **Debugger is essential** â€” Invest in good debugging; it accelerates everything else
+3. **Fail safe** â€” Any error â†’ debugger, never silent hang
+4. **Trust nothing on crash** â€” Dedicated stack, fixed memory locations
+5. **Keep it simple** â€” IDE not SCSI, FAT16 not FFS, polling not interrupts (for ROM)
+6. **68000 has 24-bit address bus** â€” Maximum address is $FFFFFF. Do not probe above this.
 
 ## Memory Map Handoff
 
@@ -370,12 +371,17 @@ $03258    $0001       ; type: chip RAM
 $0325A    $0003       ; flags: tested + DMA capable
 
 $0325C    $00200000   ; base: fast RAM at $200000
-$03260    $00800000   ; size: 8MB
+$03260    $007FE000   ; size: 8184KB ($800000 - $2000, kernel stack excluded)
 $03264    $0002       ; type: fast RAM
 $03266    $0001       ; flags: tested
 
-$03268    $00000000   ; base: 0 = end of list
-$0326C    $00000000   ; size: 0
-$03270    $0000       ; type: 0 (terminator)
-$03272    $0000       ; flags: 0
+$03268    $009FE000   ; base: kernel stack
+$0326C    $00002000   ; size: 8KB
+$03270    $0006       ; type: reserved
+$03272    $0001       ; flags: tested
+
+$03274    $00000000   ; base: 0 = end of list
+$03278    $00000000   ; size: 0
+$0327C    $0000       ; type: 0 (terminator)
+$0327E    $0000       ; flags: 0
 ```
