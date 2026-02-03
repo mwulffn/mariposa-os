@@ -117,9 +117,9 @@ start:
     bsr     SerialPrintf
     addq.l  #4,sp
 
-    ; Find fast RAM in memory table to get stack pointer
+    ; Find kernel stack (RESERVED entry) in memory table
     lea     MEMMAP_TABLE,a2
-.find_fast:
+.find_stack:
     move.l  (a2)+,d2            ; base
     move.l  (a2)+,d3            ; size
     move.w  (a2)+,d4            ; type
@@ -128,12 +128,17 @@ start:
     ; Check for end of table (both base AND size are 0)
     move.l  d2,d0
     or.l    d3,d0
-    beq.s   .no_fast_found
+    beq.s   .no_stack_found
 
-    cmp.w   #MEM_TYPE_FAST,d4
-    bne.s   .find_fast
+    ; Look for RESERVED type
+    cmp.w   #MEM_TYPE_RESERVED,d4
+    bne.s   .find_stack
 
-    ; Fast RAM found: stack = base + size
+    ; Check if this is in fast RAM range ($200000+)
+    cmp.l   #$200000,d2
+    blt.s   .find_stack         ; Skip low reserved areas
+
+    ; Kernel stack found: stack = base + size (top)
     add.l   d2,d3
 
     ; Set kernel entry parameters:
@@ -143,13 +148,13 @@ start:
     lea     debugger_entry(pc),a1
     ; SR = supervisor, interrupts disabled
     move.w  #$2700,sr
-    ; SP = top of fast RAM
+    ; SP = top of kernel stack
     move.l  d3,sp
     ; Jump to kernel
     jmp     KERNEL_LOAD_ADDR
 
-.no_fast_found:
-    pea     no_fast_ram_msg(pc)
+.no_stack_found:
+    pea     no_kernel_stack_msg(pc)
     bsr     SerialPrintf
     addq.l  #4,sp
 
@@ -349,8 +354,8 @@ boot_kernel_msg:
     dc.b    "Jumping to kernel at $200000...",10,13,0
     even
 
-no_fast_ram_msg:
-    dc.b    "ERROR: No fast RAM in memory table!",10,13,0
+no_kernel_stack_msg:
+    dc.b    "ERROR: No kernel stack in memory table!",10,13,0
     even
 
 bus_error_msg:

@@ -194,13 +194,26 @@ build_memory_table:
     lea     MEMMAP_TABLE+24,a0  ; After 2 entries (12 bytes each)
 
     ; Detect and add fast RAM entry (if any)
-    bsr     detect_fast_ram     ; d0 = size
+    bsr     detect_fast_ram     ; d0 = total size
     tst.l   d0
     beq.s   .no_fast
+
+    ; Entry: Fast RAM (minus 8KB for kernel stack)
     move.l  #$200000,(a0)+      ; Base (Zorro II)
-    move.l  d0,(a0)+            ; Size
+    move.l  d0,d3               ; Save total size
+    sub.l   #$2000,d3           ; Subtract 8KB stack
+    move.l  d3,(a0)+            ; Size (excluding stack)
     move.w  #MEM_TYPE_FAST,(a0)+
-    move.w  #$0000,(a0)+        ; Not DMA capable
+    move.w  #$0001,(a0)+        ; Tested flag
+
+    ; Entry: Kernel stack (top 8KB of fast RAM)
+    move.l  #$200000,d3         ; Base address of fast RAM
+    add.l   d0,d3               ; Add total size
+    sub.l   #$2000,d3           ; Back up 8KB
+    move.l  d3,(a0)+            ; Stack base = top - 8KB
+    move.l  #$2000,(a0)+        ; Size = 8KB
+    move.w  #MEM_TYPE_RESERVED,(a0)+
+    move.w  #$0001,(a0)+        ; Tested flag
 
 .no_fast:
     ; ROM entry
