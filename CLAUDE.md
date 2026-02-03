@@ -2,6 +2,27 @@
 
 A bare-metal operating system for Amiga 500 (OCS, 68000, 512KB chip + 1MB fast RAM).
 
+## Installation
+
+**First time setup:** Install build tools before building:
+
+```bash
+# Linux
+./install-tools-linux.sh
+
+# macOS
+./install-tools-macos.sh
+```
+
+After installation, add to your shell config (`~/.bashrc` or `~/.zshrc`):
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+export VBCC="$HOME/.vbcc"
+```
+
+**Full installation guide:** See `docs/installation.md`
+
 ## Build
 
 ```bash
