@@ -57,13 +57,11 @@ test_*.py                     - Test scripts
 
 ## Documentation
 
-- `docs/rom_design.md` - ROM architecture and design
-- `docs/debugger.md` - Interactive debugger guide
-
+Decisions about architecture and design can be found int the 'docs' directory. Read them carefully when implementing new features.
 
 ## Interactive Debugger
 
-The ROM boots directly into an interactive debugger accessible via serial port.
+The ROM boots directly into a small fast-ram based kernel
 
 **Quick Start:**
 ```bash
@@ -76,13 +74,15 @@ The ROM boots directly into an interactive debugger accessible via serial port.
 
 **Testing:**
 ```bash
-./test_comprehensive.py    # Full test suite (12 tests)
 
 # Automated testing with debug.py (accepts stdin, prints to stdout):
 echo -e "r\nq\n" | ./debug.py 2>&1              # Dump registers and quit
 echo -e "m 00200000 20\nq\n" | ./debug.py 2>&1  # Dump memory and quit
 echo -e "r\nm fc0000 10\nq\n" | ./debug.py 2>&1 # Multiple commands
 ```
+
+Testing like this is only possible if kernel has crashed to debugger, or debugger has been invoked by the code. Invoking the debugger for testing is a good thing.
+
 
 ## Next Steps
 
