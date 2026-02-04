@@ -26,7 +26,7 @@ serial_put_char:
     movem.l a6,-(sp)
     lea     CUSTOM,a6
 .wait:
-    btst    #SERDATR_TBE,SERDATR(a6)    ; Wait for TBE
+    btst    #SERDATR_TSRE,SERDATR(a6)    ; Wait for TBE
     beq.s   .wait
     move.w  d0,SERDAT(a6)               ; Send character
     movem.l (sp)+,a6

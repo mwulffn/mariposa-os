@@ -52,10 +52,10 @@ panic:
     move.l  sp,saved_a7
 
     ; Save SR
-    move.w  sr,saved_sr
+    move.w (sp),saved_sr
 
     ; Save return address as PC (caller's location)
-    move.l  (sp),saved_pc
+    move.l  2(sp),saved_pc
 
     ; Output to serial port
     bsr     panic_serial_output
@@ -71,6 +71,7 @@ panic:
 ; ============================================================
 panic_with_msg:
     move.l  a0,panic_msg_ptr
+    move.l  a0,a5
     bra.s   panic
 
 ; ============================================================
@@ -184,8 +185,8 @@ panic_serial_output:
     ; Send custom message if present
     move.l  panic_msg_ptr,d0
     beq.s   .done
-    bsr     .crlf
     move.l  d0,a0
+    bsr     .crlf
     bsr     serial_put_string
     bsr     .crlf
 

@@ -73,6 +73,10 @@ start:
     ; Print memory map table
     bsr     print_memory_map
 
+    move.l #0,d0
+    move.l #0,d1
+    divu d0,d1
+
     ; ============================================================
     ; 5. SUCCESS HALT - BRIGHT GREEN SCREEN
     ; ============================================================
@@ -145,6 +149,9 @@ start:
     move.w  #$2700,sr
     ; SP = top of fast RAM
     move.l  d3,sp
+
+
+
     ; Jump to kernel
     jmp     KERNEL_LOAD_ADDR
 

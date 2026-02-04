@@ -116,6 +116,7 @@ SERDAT          equ $030            ; Serial data (write)
 SERPER          equ $032            ; Serial period (baud rate)
 
 ; SERDATR status bits
+SERDATR_TSRE    equ 12              ; Transmit shift register empty
 SERDATR_TBE     equ 13              ; Transmit buffer empty
 SERDATR_RBF     equ 14              ; Receive buffer full
 
