@@ -16,6 +16,40 @@ extern char _bss_end;    /* Will become __bss_end in assembly */
 /* ROM panic function - set by crt0 */
 extern void (*rom_panic)(void);
 
+static const char *mem_type_name(unsigned short type)
+{
+    switch (type) {
+        case MEM_END:      return "END";
+        case MEM_CHIP:     return "CHIP";
+        case MEM_FAST:     return "FAST";
+        case MEM_ROM:      return "ROM";
+        case MEM_RESERVED: return "RESERVED";
+        default:           return "UNKNOWN";
+    }
+}
+
+static void print_memory_map(MemEntry *map)
+{
+    int entry = 0;
+
+    pr_info("\n=== Memory Map ===\n");
+    pr_info("Entry  Base       Size       Type      Flags\n");
+    pr_info("-----  ---------- ---------- --------- -----\n");
+
+    while (map->type != MEM_END) {
+        pr_info("%5d  $%08lx $%08lx %-9s $%04x\n",
+                entry,
+                map->base,
+                map->size,
+                mem_type_name(map->type),
+                map->flags);
+        map++;
+        entry++;
+    }
+
+    pr_info("==================\n\n");
+}
+
 void kernel_main(MemEntry *memmap)
 {
     /* Initialize serial */
@@ -23,7 +57,9 @@ void kernel_main(MemEntry *memmap)
 
     pr_info("\n");
     pr_info("Kernel starting successfully!\n");
-  
+
+    /* Print memory map received from ROM */
+    print_memory_map(memmap);
 
     /* Initialize memory allocator */
     mem_init(memmap, &_end);
