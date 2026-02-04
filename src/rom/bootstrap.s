@@ -73,10 +73,6 @@ start:
     ; Print memory map table
     bsr     print_memory_map
 
-    move.l #0,d0
-    move.l #0,d1
-    divu d0,d1
-
     ; ============================================================
     ; 5. SUCCESS HALT - BRIGHT GREEN SCREEN
     ; ============================================================
