@@ -1,5 +1,14 @@
 # Serial Subsystem Design
 
+> **Status.** This is the target design. Both serial paths are polled today
+> and neither uses interrupts or a ring buffer: `src/kernel/serial.c` spins on
+> SERDATR's TBE bit, and `src/rom/serial.s` spins on TSRE. The interrupt-driven
+> transmit path below waits on interrupts working at all - see
+> `docs/interrupt_control_design.md`.
+>
+> The crash path described here does already hold: the ROM debugger bangs the
+> UART directly, so it keeps working when everything else has stopped.
+
 ## Overview
 
 Kernel serial is transmit-only, interrupt-driven. A 1024-byte ring buffer decouples kprintf callers from the 9600 baud wire speed. On crash, the kernel drops to the ROM debugger which register-bangs the UART directly, bypassing the ring buffer and interrupts entirely.

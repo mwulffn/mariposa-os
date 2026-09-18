@@ -16,9 +16,10 @@ Artifacts land in the usual places — `src/rom/build/kick.rom` and
 `src/kernel/build/SYSTEM.BIN` — and are owned by you, not by root: the
 container runs as your uid/gid.
 
-Any target can be run inside the container:
+Any target can be run inside the container, including the tests:
 
 ```bash
+make docker-make DOCKER_TARGET=test
 make docker-make DOCKER_TARGET=rom
 make docker-make DOCKER_TARGET=clean
 ```
@@ -31,6 +32,8 @@ make docker-make DOCKER_TARGET=clean
 | vlink | yes | links `SYSTEM.BIN` (`-b rawbin1`) |
 | vbcc (`vbccm68k`) | yes | compiles the kernel's C |
 | mtools | yes | `make deploy` copies `SYSTEM.BIN` into `boot.hdf` |
+| Python 3 | yes | the ROM build runs `tests/mksym.py` to emit its symbol table |
+| gcc + Musashi | yes | the headless tests are host-native C; Musashi is pre-fetched to `/opt/musashi` so `make test` works offline |
 | FS-UAE | **no** | needs a display and a TCP port |
 
 So `make run` and `./debug.py` still require FS-UAE installed locally. The

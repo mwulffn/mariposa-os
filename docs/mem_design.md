@@ -1,5 +1,13 @@
 # Memory System Design
 
+> **Status.** This is the target design. `src/kernel/mem.c` today is a bump
+> allocator with no `free()` at all: two heaps, a pointer each, and
+> `mem_alloc` walks it forward. Everything below - free lists, coalescing,
+> best-fit for chip and first-fit for fast - is still to be built.
+>
+> The allocator is pure logic with no hardware dependency, so it is a good
+> candidate for host-compiled unit tests when it is written.
+
 ## Overview
 
 Two separate heaps using the same free-list allocator with coalescing. Chip RAM uses best-fit strategy to minimize fragmentation. Fast RAM uses first-fit for speed.

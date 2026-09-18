@@ -6,10 +6,20 @@ This guide covers installing the required build tools for the Amiga OS project o
 
 Required tools:
 - **vasm** (vasmm68k_mot variant) - 68000 assembler
+- **Python 3** - required by the ROM build, which runs `tests/mksym.py` to
+  emit a symbol table; also used by `debug.py` and the test scripts
 - **vbcc** (vbccm68k + vlink) - C compiler and linker for 68000
 - **mtools** - FAT filesystem manipulation
 - **FS-UAE** - Amiga emulator
-- **Python 3** - For debug script
+
+For `make test` (the headless tests) you also need a **host C compiler** and,
+on first run only, **git** - it fetches Musashi into `tools/musashi/`.
+No 68000 toolchain beyond vasm is needed for the tests.
+
+> **Prefer not to install any of this?** `make docker-build` builds the whole
+> toolchain from upstream source in a container and runs these Makefiles
+> inside it. FS-UAE is not included, so `make run` and `./debug.py` still need
+> a local install. See `docs/docker.md`.
 
 ## Installation
 

@@ -1,11 +1,32 @@
 # ROM Design Document
 
+> **Status.** This is the design, not a description of the current ROM.
+> Everything in the boot path is built and tested: hardware init, Zorro II
+> autoconfig, memory detection, serial, IDE, RDB, FAT16, loading SYSTEM.BIN,
+> and the exception handlers.
+>
+> **Not built yet**, kept here as the plan:
+> - Debugger: keyboard I/O via CIA-A, breakpoints, single stepping,
+>   disassembly, console with built-in 8x8 font. The debugger is serial-only
+>   today with `r`, `m`, `g` and `?`.
+> - The dedicated debugger stack in the memory map below. `DBG_STACK` is
+>   defined in `hardware.i` but never loaded, so exceptions run on whatever
+>   stack was current. It is also at an odd address, which would address-error
+>   on a 68000 if it were used.
+> - Saving the fault address for bus and address errors. The handler decodes
+>   the right frame for them but keeps only SR and PC.
+> - ROM services beyond panic and serial output - no ConPrint, no version
+>   query, and no jump table at all. The kernel receives only a panic vector.
+> - Interrupts. Nothing enables them; see `docs/interrupt_control_design.md`.
+>
+> See `docs/testing.md` for what is covered by tests.
+
 ## Target Hardware
 
 - **CPU:** 68000 @ 7.14MHz
 - **Chipset:** ECS (Enhanced Chip Set)
-- **Chip RAM:** 1MB
-- **Fast RAM:** 8MB
+- **Chip RAM:** 1MB (detection handles 512KB, 1MB and 2MB)
+- **Fast RAM:** 8MB maximum; sized at runtime, whatever is present
 - **Storage:** IDE hard drive
 - **Reference machine:** A500+ with expansion
 
@@ -59,7 +80,8 @@
    - Privilege violation
    - All handlers â†’ debugger with context
 
-7. **ROM Services**
+7. **ROM Services** *(planned - there is no service jump table today; the
+   kernel is handed a panic vector in A1 and nothing else)*
    - Panic: dump registers, enter debugger
    - SerPutc/SerPuts: serial output
    - ConPrint: console output
@@ -70,7 +92,7 @@
 ```
 $00000 - $003FF   Exception vectors (1KB)
 $00400 - $0044F   Register dump area (80 bytes)
-$00450 - $0084F   Debugger stack (1KB, grows down from $0084F)
+$00450 - $0084F   Debugger stack (1KB, planned - not used by the code yet)
 $00850 - $008CF   Debugger command buffer (128 bytes)
 $008D0 - $0094F   Reserved (128 bytes)
 $00950 - $00A4F   Copper list for debugger (256 bytes)
@@ -86,10 +108,12 @@ $04000 - $FFFFF   Kernel-managed chip RAM (~1008KB)
 On any exception:
 
 1. Store SP to fixed address immediately
-2. Switch to debugger stack ($0084F)
+2. Switch to debugger stack ($0084F)  *(planned)*
 3. Save all registers to dump area
-4. Retrieve PC/SR from old stack (pushed by CPU)
-5. For bus/address errors: save fault address
+4. Retrieve PC/SR from the exception frame. Bus and address error are group 0
+   faults and push SSW, access address and IR ahead of the SR/PC pair, so they
+   enter through `panic_with_msg_group0` and read them 8 bytes further in.
+5. For bus/address errors: save fault address  *(planned)*
 6. Initialize debugger display
 7. Enter interactive debugger
 
@@ -110,8 +134,9 @@ On any exception:
    - Run Zorro II autoconfig (relocate expansion cards)
    - Size chip RAM (512KB, 1MB, 2MB) with mirror detection
    - Size fast RAM at $200000
-   - Reserve top 8KB of fast RAM for kernel stack ($9FE000-$9FFFFF)
-   - Quick test (optional, skippable)
+   - Reserve top 8KB of detected fast RAM for the kernel stack, wherever
+     that lands - not a fixed address
+   - Quick test of chip RAM (currently always runs; halts on failure)
    - Build memory map table at $3250
    
 4. Serial init
@@ -127,8 +152,11 @@ On any exception:
 6. Transfer to kernel
    - A0 = pointer to memory map ($3250)
    - A1 = ROM debugger entry point
-   - SSP = top of kernel stack ($A00000, 8KB reserved at $9FE000-$9FFFFF)
+   - SSP = top of the reserved kernel stack, found by scanning the memory
+     map for the RESERVED entry above $200000
    - Jump to $200000
+   - Note: the partition LBA and size are computed during load and then
+     dropped. The kernel is not told where it booted from.
    
 On failure at any step â†’ enter debugger with error message
 ```

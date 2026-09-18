@@ -4,7 +4,7 @@ Two tiers. The fast one needs no Amiga at all.
 
 | Tier | What it covers | Cost | Command |
 |------|----------------|------|---------|
-| Headless CPU | ROM routines and the kernel's libsup.s, as real 68000 code, incl. the whole IDE/RDB/FAT16 path | ~80ms for the whole suite | `make test` |
+| Headless CPU | ROM routines and the kernel's libsup.s, as real 68000 code, incl. the whole IDE/RDB/FAT16 path | ~0.3s for the whole suite | `make test` |
 | FS-UAE | Boot path, real hardware behaviour | seconds, needs a display | `./debug.py`, `test_*.py` |
 
 Everything that is pure logic belongs in the first tier. Reserve the emulator
@@ -169,7 +169,7 @@ catch.
 ## What the suite found
 
 Everything it turned up has been fixed, and the tests that found each bug now
-guard the fix. The suite is 107 tests, no xfails.
+guard the fix. The suite is 127 tests, no xfails.
 
 The storage path was in good shape from the start: `ide.s`, `find_rdb`, the
 FAT16 boot-sector parse, the directory scan, the chain walk and
