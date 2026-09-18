@@ -142,7 +142,7 @@ The ROM boots directly into a small fast-ram based kernel
 
 **Commands:** `r` (registers), `m` (memory), `g` (go), `?` (help)
 
-**Full documentation:** See `docs/debugger.md`
+**Full documentation:** See `docs/rom/debugger.md`
 
 **Testing:**
 ```bash
