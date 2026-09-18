@@ -156,40 +156,44 @@ catch.
 
 ## What the suite found
 
-The storage path is in better shape than the formatting code: `ide.s`,
-`find_rdb`, the FAT16 boot-sector parse, the directory scan, the chain walk
-and `load_system_bin` all passed against a real generated image first try,
-including loading all 5000 bytes of a ten-cluster scattered file to `$200000`
-in the right order.
+Everything it turned up has been fixed, and the tests that found each bug now
+guard the fix. The suite is 107 tests, no xfails.
 
-Two bugs it pinned have since been fixed, and the tests that found them now
-guard the fixes:
+The storage path was in good shape from the start: `ide.s`, `find_rdb`, the
+FAT16 boot-sector parse, the directory scan, the chain walk and
+`load_system_bin` all passed against a real generated image first try,
+including loading a ten-cluster scattered file to `$200000` in the right
+order. The formatting code was where the bugs lived.
 
-- **Partition LBA overflow.** `load_partition` computed
-  `LowCyl * Heads * Sectors` with chained `mulu.w`, which is 16x16, so the
-  `LowCyl * Heads` intermediate truncated. At 20000 cylinders and 4 heads,
-  80000 became 14464 and the start LBA came out `$71000` instead of
-  `$271000` — any partition more than roughly 2GB into a disk read from the
-  wrong place.
-- **`%d` above 655359.** `FormatDecToBuffer` used `divu.w #10`, which is
-  32/16 → 16 and overflows once the quotient passes 65535. On overflow the
-  68000 leaves the destination untouched, so the digits were garbage.
-  `partition.s` prints LBAs and block counts with `%d`, so this was live.
+**Two 16-bit overflows**, both of instructions that fail quietly:
 
-Both now go through `src/rom/math.s`: `mul32x16` for the multiply and
-`divu32_10` for the divide, each tested at its boundaries and swept against
+- `load_partition` computed `LowCyl * Heads * Sectors` with chained `mulu.w`,
+  which is 16x16, so the intermediate truncated. At 20000 cylinders and 4
+  heads, 80000 became 14464 — any partition more than roughly 2GB into a disk
+  read from the wrong place.
+- `FormatDecToBuffer` and `serial_put_decimal` used `divu.w #10`, which is
+  32/16 → 16 and overflows once the quotient passes 65535, i.e. from 655360
+  up. On overflow the 68000 leaves the destination untouched, so the digits
+  were garbage rather than obviously wrong.
+
+Both now go through `src/rom/math.s` (`mul32x16`, `divu32_10`), swept against
 host arithmetic over a few thousand values.
 
-Building the first tier also turned up a bug that reading the code had
-missed, still open: `serial_put_decimal` is wrong for every multi-digit
-value. Its reversal loop decrements the tail pointer before storing the saved
-byte, so it writes to the wrong index, and it then prints from the advanced
-head pointer rather than the buffer start — `4095` comes out as `54`. It also
-still uses `divu.w #10`. It is uncalled, so the bugs are latent.
+**A format syntax that did not match its own documentation.** `sprintf.s`
+accepted the size modifier only *before* the specifier (`%.lx`), while almost
+every caller wrote it after (`%x.l`, `%x.b`). Those printed a full longword
+followed by the modifier as literal text. The parser now accepts both
+spellings — but only after `%x` and `%b`, where a size means something, so
+`"%s.bin"` and `"%d.log"` keep their dots instead of losing two characters.
 
-The remaining xfails are in `sprintf.s`, and the sharpest is that the
-documented format syntax is not the implemented one. The parser wants the size
-modifier *before* the specifier (`%.lx`), but almost every caller writes it
-after (`%x.l`, `%x.b`). Those print a full longword followed by the modifier as
-literal text — so the values are right and the argument pointer stays in step,
-but the output is wrong. Only `memory.s` uses the form the parser implements.
+**Two narrower bugs in the same area.** `%.bx` and `%.wx` read a *word* from
+a longword stack slot and got the high half; every path now reads a long and
+narrows. And the width parser consumed a single digit, so `%08x` read `0` as
+the width and `8` as the specifier and dropped the whole thing; it now parses
+multiple digits, clamped to 8.
+
+**A bug reading the code had missed**, found by running it:
+`serial_put_decimal` was wrong for every multi-digit value. Its reversal loop
+decremented the tail pointer before storing the byte it had saved, so it
+wrote one place short, and it then printed from the head pointer the loop had
+advanced — `4095` came out as `54`.

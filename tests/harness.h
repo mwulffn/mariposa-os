@@ -124,9 +124,14 @@ void h_set_cycle_budget(uint64_t cycles);
 
 /* --- serial capture ----------------------------------------------------- */
 
-/* Everything the guest has written to SERDAT since the last h_reset. */
+/* Everything the guest has written to SERDAT since the last h_reset or
+ * h_serial_clear(). */
 const char *h_serial(void);
 size_t      h_serial_len(void);
+
+/* Drop the captured output. A test that calls a printing routine more than
+ * once needs this between calls, or it reads back all of them concatenated. */
+void        h_serial_clear(void);
 
 /* Queue input for serial_get_char / serial_wait_char.
  *

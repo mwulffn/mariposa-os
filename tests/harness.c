@@ -612,8 +612,9 @@ h_result h_run(uint32_t pc)
 
 /* ---------------------------------------------------------------- lifecycle */
 
-const char *h_serial(void)   { g_tx[g_tx_len] = '\0'; return g_tx; }
+const char *h_serial(void)     { g_tx[g_tx_len] = '\0'; return g_tx; }
 size_t      h_serial_len(void) { return g_tx_len; }
+void        h_serial_clear(void) { g_tx_len = 0; g_tx[0] = '\0'; }
 
 void h_serial_input(const char *s)
 {

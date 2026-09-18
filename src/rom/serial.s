@@ -167,51 +167,54 @@ serial_put_hex32:
 ; ============================================================
 ; serial_put_decimal - Print decimal number
 ; ============================================================
-; D0.l = number to print
-; Preserves all registers except D0, D1, A0, A1 (scratch)
+; D0.l = number to print (unsigned, full 32-bit range)
+; Preserves all registers
 serial_put_decimal:
-    movem.l d2/a2,-(sp)
+    movem.l d0-d2/a0-a2,-(sp)
 
-    lea     SPRINTF_BUFFER,a0
-    move.l  a0,a1           ; Save start position
+    lea     SPRINTF_BUFFER,a2   ; A2 = buffer start, never moves
+    move.l  a2,a0               ; A0 = write pointer
 
     ; Handle zero special case
     tst.l   d0
     bne.s   .convert
     move.b  #'0',(a0)+
-    bra.s   .terminate
+    clr.b   (a0)
+    bra.s   .send
 
 .convert:
-    ; Convert to decimal (store digits in reverse)
-    move.l  a0,a1           ; Mark start
+    ; Digits come out least significant first. divu32_10 rather than
+    ; divu.w #10, which is 32/16 -> 16 and overflows for any value from
+    ; 655360 up, leaving its destination untouched.
 .digit_loop:
-    move.l  d0,d1
-    divu    #10,d1          ; d1 = d0 / 10
-    swap    d1              ; Remainder in low word
-    add.b   #'0',d1         ; Convert to ASCII
-    move.b  d1,(a0)+        ; Store digit
-    clr.w   d1
-    swap    d1
-    move.l  d1,d0           ; Quotient becomes new dividend
+    bsr     divu32_10           ; D0 = quotient, D1 = remainder
+    add.b   #'0',d1
+    move.b  d1,(a0)+
     tst.l   d0
     bne.s   .digit_loop
 
-    ; Reverse the string
-    move.l  a0,a2           ; End position
-    subq.l  #1,a2
+    clr.b   (a0)                ; Null terminate while A0 is still at the end
+
+    ; Reverse in place: A1 walks forward from the first digit, A0 back from
+    ; the last, and A2 still holds the start to print from. The old version
+    ; decremented its tail pointer before storing the byte it had saved, so
+    ; it wrote one place short, and then printed from the head pointer the
+    ; loop had advanced - "4095" came out as "54".
+    move.l  a2,a1
+    subq.l  #1,a0
 .reverse_loop:
-    cmp.l   a1,a2
-    ble.s   .terminate
+    cmp.l   a1,a0
+    bls.s   .send
     move.b  (a1),d1
-    move.b  (a2),(a1)+
-    subq.l  #1,a2
-    move.b  d1,(a2)
+    move.b  (a0),d2
+    move.b  d2,(a1)+
+    move.b  d1,(a0)
+    subq.l  #1,a0
     bra.s   .reverse_loop
 
-.terminate:
-    clr.b   (a0)            ; Null terminate
-    move.l  a1,a0
+.send:
+    move.l  a2,a0
     bsr     serial_put_string
 
-    movem.l (sp)+,d2/a2
+    movem.l (sp)+,d0-d2/a0-a2
     rts

@@ -18,6 +18,8 @@ static const char *rom_printf(const char *fmt, const uint32_t *args, int nargs)
     h_result r;
     int i;
 
+    /* Scope the capture to this call, so a test may format more than once. */
+    h_serial_clear();
     h_begin_call();
     for (i = nargs - 1; i >= 0; i--)
         h_push32(args[i]);
@@ -273,6 +275,141 @@ static void t_put_decimal_large(void)
     CHECK_STR("1000000", h_serial());
 }
 
+
+/* --- size modifier, both spellings -------------------------------------- */
+
+static void t_hex_suffix_and_prefix_agree(void)
+{
+    /* %x.b and %.bx are the same thing. Callers in this ROM write the
+     * first; memory.s writes the second. */
+    CHECK_STR("AB", rom_printf1("%x.b", 0x12345ABu));
+    CHECK_STR("AB", rom_printf1("%.bx", 0x12345ABu));
+    CHECK_STR("45AB", rom_printf1("%x.w", 0x12345ABu));
+    CHECK_STR("45AB", rom_printf1("%.wx", 0x12345ABu));
+    CHECK_STR("012345AB", rom_printf1("%x.l", 0x12345ABu));
+    CHECK_STR("012345AB", rom_printf1("%.lx", 0x12345ABu));
+}
+
+static void t_size_narrows_not_reads_short(void)
+{
+    /* The bug was reading a word from a longword slot and getting the high
+     * half. A value whose halves differ catches that. */
+    CHECK_STR("EF", rom_printf1("%x.b", 0xDEADBEEFu));
+    CHECK_STR("BEEF", rom_printf1("%x.w", 0xDEADBEEFu));
+}
+
+static void t_size_keeps_later_args_aligned(void)
+{
+    /* Whatever the size, one longword slot is consumed, so the following
+     * argument must still line up. */
+    uint32_t args[3];
+    args[0] = 0xAAu;
+    args[1] = 0xBBBBu;
+    args[2] = 0xCCCCCCCCu;
+    CHECK_STR("AA/BBBB/CCCCCCCC", rom_printf("%x.b/%x.w/%x.l", args, 3));
+}
+
+static void t_dot_after_string_is_literal(void)
+{
+    /* "%s.bin" must not read ".b" as a size and print "in". */
+    uint32_t arg = h_str("SYSTEM");
+    CHECK_STR("SYSTEM.bin", rom_printf1("%s.bin", arg));
+}
+
+static void t_dot_after_decimal_is_literal(void)
+{
+    CHECK_STR("3.log", rom_printf1("%d.log", 3));
+}
+
+static void t_dot_between_decimals_is_literal(void)
+{
+    uint32_t args[2] = { 1, 5 };
+    CHECK_STR("v1.5", rom_printf("v%d.%d", args, 2));
+}
+
+static void t_dot_not_a_size_letter_is_literal(void)
+{
+    CHECK_STR("0000002A.txt", rom_printf1("%x.txt", 42));
+}
+
+static void t_trailing_dot(void)
+{
+    CHECK_STR("0000002A.", rom_printf1("%x.", 42));
+}
+
+/* --- width -------------------------------------------------------------- */
+
+static void t_width_single_digit(void)
+{
+    CHECK_STR("BEEF", rom_printf1("%4x", 0xDEADBEEFu));
+}
+
+static void t_width_two_digits(void)
+{
+    CHECK_STR("00001234", rom_printf1("%08x", 0x1234u));
+}
+
+static void t_width_clamped_to_eight(void)
+{
+    /* A 32-bit value has no more than 8 hex digits, and a wider count would
+     * overflow the shift in FormatHexToBuffer. */
+    CHECK_STR("DEADBEEF", rom_printf1("%12x", 0xDEADBEEFu));
+}
+
+static void t_width_overrides_size(void)
+{
+    CHECK_STR("000000AB", rom_printf1("%08x.b", 0xDEADBEABu));
+}
+
+/* --- %b ----------------------------------------------------------------- */
+
+static void t_binary_byte(void)
+{
+    CHECK_STR("10100101", rom_printf1("%b.b", 0xA5u));
+}
+
+static void t_binary_word(void)
+{
+    CHECK_STR("1010010101011010", rom_printf1("%b.w", 0xA55Au));
+}
+
+static void t_binary_default_is_long(void)
+{
+    CHECK_STR("10000000000000000000000000000001", rom_printf1("%b", 0x80000001u));
+}
+
+/* --- serial_put_decimal ------------------------------------------------- */
+
+static void t_put_decimal_zero(void)
+{
+    h_result r;
+    h_begin_call();
+    h_set_d(0, 0);
+    r = h_call(h_sym("serial_put_decimal"));
+    CHECK_CALL(r);
+    CHECK_STR("0", h_serial());
+}
+
+static void t_put_decimal_two_digits(void)
+{
+    h_result r;
+    h_begin_call();
+    h_set_d(0, 42);
+    r = h_call(h_sym("serial_put_decimal"));
+    CHECK_CALL(r);
+    CHECK_STR("42", h_serial());
+}
+
+static void t_put_decimal_max_u32(void)
+{
+    h_result r;
+    h_begin_call();
+    h_set_d(0, 0xFFFFFFFFu);
+    r = h_call(h_sym("serial_put_decimal"));
+    CHECK_CALL(r);
+    CHECK_STR("4294967295", h_serial());
+}
+
 /* --- parse_hex ---------------------------------------------------------- */
 
 /* A0 = string, returns D0 = value, D1 = digit count, A0 advanced. */
@@ -335,20 +472,14 @@ static const test_case tests[] = {
 
     { "hex_default_is_long",     t_hex_default_is_long,     NULL },
     { "hex_small_value_pads",    t_hex_small_value_pads_to_8, NULL },
-    { "hex_long_suffix",         t_hex_long_suffix,
-      "sprintf.s wants the size modifier BEFORE the specifier (%.lx), so the '.l' in '%x.l' is echoed as literal text" },
-    { "hex_byte_suffix",         t_hex_byte_suffix,
-      "sprintf.s wants the size modifier BEFORE the specifier (%.lx), so the '.l' in '%x.l' is echoed as literal text" },
-    { "hex_word_suffix",         t_hex_word_suffix,
-      "sprintf.s wants the size modifier BEFORE the specifier (%.lx), so the '.l' in '%x.l' is echoed as literal text" },
+    { "hex_long_suffix",         t_hex_long_suffix, NULL },
+    { "hex_byte_suffix",         t_hex_byte_suffix, NULL },
+    { "hex_word_suffix",         t_hex_word_suffix, NULL },
     { "hex_prefix_long",         t_hex_prefix_long,         NULL },
-    { "hex_prefix_byte",         t_hex_prefix_byte,
-      "%.bx/%.wx read a word from a longword stack slot, picking up the high half" },
-    { "hex_prefix_word",         t_hex_prefix_word,
-      "%.bx/%.wx read a word from a longword stack slot, picking up the high half" },
+    { "hex_prefix_byte",         t_hex_prefix_byte, NULL },
+    { "hex_prefix_word",         t_hex_prefix_word, NULL },
     { "hex_width",               t_hex_width,               NULL },
-    { "hex_zero_pad_width",      t_hex_zero_pad_width,
-      "width parser consumes one digit, so '0' of '%08x' becomes the width and '8' is read as the specifier" },
+    { "hex_zero_pad_width",      t_hex_zero_pad_width, NULL },
 
     { "decimal_zero",            t_decimal_zero,            NULL },
     { "decimal_small",           t_decimal_small,           NULL },
@@ -365,17 +496,33 @@ static const test_case tests[] = {
     { "two_hex_args",            t_two_hex_args,            NULL },
     { "three_decimal_args",      t_three_decimal_args,      NULL },
     { "mixed_args",              t_mixed_args,              NULL },
-    { "two_byte_args_like_ide",  t_two_byte_args_like_ide,
-      "sprintf.s wants the size modifier BEFORE the specifier (%.lx), so the '.l' in '%x.l' is echoed as literal text" },
+    { "two_byte_args_like_ide",  t_two_byte_args_like_ide, NULL },
 
     { "put_hex32",               t_put_hex32,               NULL },
     { "put_hex16",               t_put_hex16,               NULL },
     { "put_hex8",                t_put_hex8,                NULL },
     { "put_string",              t_put_string,              NULL },
-    { "put_decimal_small",       t_put_decimal_small,
-      "serial_put_decimal reversal stores at the wrong index then prints from the advanced pointer; currently uncalled" },
-    { "put_decimal_large",       t_put_decimal_large,
-      "serial_put_decimal reversal stores at the wrong index then prints from the advanced pointer; currently uncalled" },
+    { "put_decimal_small",       t_put_decimal_small, NULL },
+    { "put_decimal_large",       t_put_decimal_large, NULL },
+    { "put_decimal_zero",        t_put_decimal_zero,        NULL },
+    { "put_decimal_two_digits",  t_put_decimal_two_digits,  NULL },
+    { "put_decimal_max_u32",     t_put_decimal_max_u32,     NULL },
+
+    { "suffix_and_prefix_agree", t_hex_suffix_and_prefix_agree,      NULL },
+    { "size_narrows",            t_size_narrows_not_reads_short,     NULL },
+    { "size_keeps_args_aligned", t_size_keeps_later_args_aligned,    NULL },
+    { "dot_after_string",        t_dot_after_string_is_literal,      NULL },
+    { "dot_after_decimal",       t_dot_after_decimal_is_literal,     NULL },
+    { "dot_between_decimals",    t_dot_between_decimals_is_literal,  NULL },
+    { "dot_not_size_letter",     t_dot_not_a_size_letter_is_literal, NULL },
+    { "trailing_dot",            t_trailing_dot,                     NULL },
+    { "width_single_digit",      t_width_single_digit,               NULL },
+    { "width_two_digits",        t_width_two_digits,                 NULL },
+    { "width_clamped",           t_width_clamped_to_eight,           NULL },
+    { "width_overrides_size",    t_width_overrides_size,             NULL },
+    { "binary_byte",             t_binary_byte,                      NULL },
+    { "binary_word",             t_binary_word,                      NULL },
+    { "binary_default_long",     t_binary_default_is_long,           NULL },
 
     { "parse_hex_basic",         t_parse_hex_basic,         NULL },
     { "parse_hex_dollar_prefix", t_parse_hex_dollar_prefix, NULL },
