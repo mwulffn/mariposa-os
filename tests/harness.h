@@ -65,12 +65,28 @@ void h_shutdown(void);
  * capture and the scratch allocator. Call before every test. */
 void h_reset(void);
 
+/* --- extra code modules --------------------------------------------------
+ *
+ * Load a position-independent blob at a fixed address so its routines can be
+ * called like ROM ones. This is how the kernel's libsup.s gets tested: it is
+ * assembled standalone to origin zero, loaded here, and its symbols merged
+ * with a matching bias.
+ *
+ * The blob is re-applied after every h_reset(), since reset clears RAM.
+ * Fails loudly rather than silently if the file is missing.
+ */
+int h_load_module(const char *path, uint32_t addr);
+
 /* --- symbols ------------------------------------------------------------ */
 
 /* Address of a ROM label or equate, by name, as emitted by tests/mksym.py.
  * An unknown name is a harness error: it aborts with a clear message rather
  * than letting a test silently run against address zero. */
 uint32_t h_sym(const char *name);
+
+/* Merge a second symbol file, adding `bias` to every value. Use it for a
+ * module assembled at origin zero and loaded somewhere else. */
+int h_add_symbols(const char *path, uint32_t bias);
 
 /* --- guest memory ------------------------------------------------------- */
 

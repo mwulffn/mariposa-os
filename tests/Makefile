@@ -10,6 +10,13 @@ MUSASHI_DIR  ?= ../tools/musashi
 ROM ?= ../src/rom/build/kick.rom
 SYM ?= ../src/rom/build/kick.sym
 
+# The kernel's vbcc support library. Assembled standalone here rather than
+# built with the kernel, so these tests need no C cross compiler.
+ASM        ?= vasmm68k_mot
+LIBSUP_SRC  = ../src/kernel/libsup.s
+LIBSUP_BIN  = $(BUILD)/libsup.bin
+LIBSUP_SYM  = $(BUILD)/libsup.sym
+
 BUILD  = build
 TARGET = $(BUILD)/run-tests
 
@@ -21,7 +28,7 @@ CFLAGS_MUSASHI = -O2 -g -w -I$(MUSASHI_DIR)
 LDLIBS         = -lm
 
 TEST_SRC = main.c protocol.c harness.c test_math.c test_format.c \
-           test_vectors.c test_disk.c
+           test_vectors.c test_disk.c test_libsup.c
 TEST_OBJ = $(TEST_SRC:%.c=$(BUILD)/%.o)
 
 MUSASHI_OBJ = $(BUILD)/m68kcpu.o $(BUILD)/m68kdasm.o $(BUILD)/m68kops.o \
@@ -36,8 +43,8 @@ all: $(TARGET)
 # Exit code is the verdict: 0 all passed, 1 a test failed, 2 harness error.
 # FILTER=substring narrows the run to matching "suite.test" names.
 FILTER ?=
-run: $(TARGET) $(DISK_STAMP)
-	@./$(TARGET) --rom $(ROM) --sym $(SYM) --diskdir $(BUILD) $(if $(FILTER),--filter $(FILTER),)
+run: $(TARGET) $(DISK_STAMP) $(LIBSUP_SYM)
+	@./$(TARGET) --rom $(ROM) --sym $(SYM) --builddir $(BUILD) $(if $(FILTER),--filter $(FILTER),)
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -52,6 +59,12 @@ $(DISK_STAMP): mkdisk.py | $(BUILD)
 	@python3 mkdisk.py $(BUILD)
 
 $(BUILD)/test_disk.o: $(DISK_STAMP)
+
+# libsup.s is position independent, so origin zero is fine - the harness
+# loads it elsewhere and biases its symbols to match.
+$(LIBSUP_SYM): $(LIBSUP_SRC) mksym.py | $(BUILD)
+	$(ASM) -Fbin -m68000 -no-opt -o $(LIBSUP_BIN) -L $(BUILD)/libsup.lst $(LIBSUP_SRC)
+	@python3 mksym.py $(BUILD)/libsup.lst $(LIBSUP_SYM)
 
 $(BUILD)/%.o: %.c $(MUSASHI_STAMP) | $(BUILD)
 	$(CC) $(CFLAGS_TEST) -c -o $@ $<

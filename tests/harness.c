@@ -416,11 +416,13 @@ typedef struct { char name[64]; uint32_t addr; } sym_t;
 static sym_t  *g_syms;
 static size_t  g_nsyms;
 
-static void load_symbols(const char *path)
+static size_t g_symcap;
+
+static int load_symbols(const char *path, uint32_t bias)
 {
     FILE *f = fopen(path, "r");
     char line[256];
-    size_t cap = 0;
+    size_t before = g_nsyms;
 
     if (!f) {
         fprintf(stderr,
@@ -433,24 +435,30 @@ static void load_symbols(const char *path)
         unsigned long addr;
         if (sscanf(line, "%63s %lx", name, &addr) != 2)
             continue;
-        if (g_nsyms == cap) {
-            cap = cap ? cap * 2 : 256;
-            g_syms = realloc(g_syms, cap * sizeof *g_syms);
+        if (g_nsyms == g_symcap) {
+            g_symcap = g_symcap ? g_symcap * 2 : 256;
+            g_syms = realloc(g_syms, g_symcap * sizeof *g_syms);
             if (!g_syms) { fprintf(stderr, "harness: out of memory\n"); exit(2); }
         }
         snprintf(g_syms[g_nsyms].name, sizeof g_syms[g_nsyms].name, "%s", name);
-        g_syms[g_nsyms].addr = (uint32_t)addr;
+        g_syms[g_nsyms].addr = (uint32_t)addr + bias;
         g_nsyms++;
     }
     fclose(f);
 
-    if (g_nsyms == 0) {
+    if (g_nsyms == before) {
         fprintf(stderr,
-            "harness: symbol file '%s' is empty\n"
+            "harness: symbol file '%s' added no symbols\n"
             "         tests/mksym.py may not understand this vasm's listing format\n",
             path);
         exit(2);
     }
+    return 0;
+}
+
+int h_add_symbols(const char *path, uint32_t bias)
+{
+    return load_symbols(path, bias);
 }
 
 uint32_t h_sym(const char *name)
@@ -465,6 +473,68 @@ uint32_t h_sym(const char *name)
         "         it may have been renamed, or it is a local label (.foo),\n"
         "         which vasm does not export\n", name);
     exit(2);
+}
+
+/* ------------------------------------------------------------------ modules */
+
+#define MAX_MODULES 4
+
+typedef struct { uint8_t *data; size_t len; uint32_t addr; } module_t;
+
+static module_t g_modules[MAX_MODULES];
+static int      g_nmodules;
+
+static void apply_modules(void)
+{
+    int i;
+    for (i = 0; i < g_nmodules; i++) {
+        uint8_t *p = raw_ptr(g_modules[i].addr, NULL);
+        if (p) memcpy(p, g_modules[i].data, g_modules[i].len);
+    }
+}
+
+int h_load_module(const char *path, uint32_t addr)
+{
+    FILE *f = fopen(path, "rb");
+    long size;
+    uint8_t *buf;
+
+    if (g_nmodules == MAX_MODULES) {
+        fprintf(stderr, "harness: too many modules\n");
+        return 2;
+    }
+    if (!f) {
+        fprintf(stderr,
+            "harness: cannot open module '%s'\n"
+            "         build it first: make -C tests\n", path);
+        return 2;
+    }
+    fseek(f, 0, SEEK_END);
+    size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (size <= 0 || raw_ptr(addr, NULL) == NULL ||
+        raw_ptr(addr + (uint32_t)size - 1, NULL) == NULL) {
+        fprintf(stderr, "harness: module '%s' does not fit at $%06X\n", path, addr);
+        fclose(f);
+        return 2;
+    }
+    buf = malloc((size_t)size);
+    if (!buf || fread(buf, 1, (size_t)size, f) != (size_t)size) {
+        fprintf(stderr, "harness: short read on module '%s'\n", path);
+        fclose(f);
+        free(buf);
+        return 2;
+    }
+    fclose(f);
+
+    g_modules[g_nmodules].data = buf;
+    g_modules[g_nmodules].len  = (size_t)size;
+    g_modules[g_nmodules].addr = addr;
+    g_nmodules++;
+
+    apply_modules();
+    return 0;
 }
 
 /* ------------------------------------------------------------------ scratch */
@@ -640,6 +710,8 @@ void h_reset(void)
     g_fault_detail[0] = '\0';
     g_scratch_next = H_SCRATCH_BASE;
 
+    apply_modules();        /* reset cleared RAM; put the blobs back */
+
     /* Reset reads SSP from $0 and PC from $4. Give it something sane so the
      * reset itself does not look like a wild fetch. */
     h_poke32(0, H_STACK_TOP);
@@ -690,13 +762,18 @@ int h_init(const char *rom_path, const char *sym_path)
         return 2;
     }
 
-    load_symbols(sym_path);
+    load_symbols(sym_path, 0);
     h_reset();
     return 0;
 }
 
 void h_shutdown(void)
 {
+    int i;
+    for (i = 0; i < g_nmodules; i++)
+        free(g_modules[i].data);
+    g_nmodules = 0;
+
     h_detach_disk();
     free(g_chip); free(g_fast); free(g_rom); free(g_syms);
     g_chip = g_fast = g_rom = NULL; g_syms = NULL; g_nsyms = 0;

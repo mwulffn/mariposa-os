@@ -4,7 +4,7 @@ Two tiers. The fast one needs no Amiga at all.
 
 | Tier | What it covers | Cost | Command |
 |------|----------------|------|---------|
-| Headless CPU | ROM routines, as real 68000 code, incl. the whole IDE/RDB/FAT16 path | ~70ms for the whole suite | `make test` |
+| Headless CPU | ROM routines and the kernel's libsup.s, as real 68000 code, incl. the whole IDE/RDB/FAT16 path | ~80ms for the whole suite | `make test` |
 | FS-UAE | Boot path, real hardware behaviour | seconds, needs a display | `./debug.py`, `test_*.py` |
 
 Everything that is pure logic belongs in the first tier. Reserve the emulator
@@ -118,6 +118,18 @@ reads `SERDATR` as a word, whereas Paula needs an `INTREQ` write to ack.
 Without it `serial_get_char`, which never acks, would spin forever. A test of
 the ack path itself has to check `INTREQ` directly.
 
+### Testing code outside the ROM
+
+`libsup.s` lives in `src/kernel/`, not the ROM, and holds the 32-bit divide
+and modulo helpers vbcc emits calls to. It is position independent - only
+PC-relative branches, no data references - so the tests assemble it
+standalone to origin zero, load it at `$100000` with `h_load_module()`, and
+merge its symbols with a matching bias via `h_add_symbols()`. No C cross
+compiler needed, so these run even where vbcc is not installed.
+
+The same mechanism will take `SYSTEM.BIN` once there is a reason to call into
+a built kernel.
+
 ### The disk tier
 
 `tests/mkdisk.py` builds the images: a raw IDE disk carrying an Amiga Rigid
@@ -191,6 +203,24 @@ a longword stack slot and got the high half; every path now reads a long and
 narrows. And the width parser consumed a single digit, so `%08x` read `0` as
 the width and `8` as the specifier and dropped the whole thing; it now parses
 multiple digits, clamped to 8.
+
+**`libsup.s` came out clean.** Twenty tests over the four helpers - both
+paths of each (the `divu.w` fast path and the shift-subtract fallback), the
+sign combinations for the signed versions, divide by zero, and 6000 swept
+random cases against host arithmetic. No failures.
+
+That was not the expected result. The shift-subtract loop keeps its remainder
+in a register the same width as the divisor, which looks like it should lose
+the top bit whenever the divisor exceeds 2^31. It does not: after k dividend
+bits have been consumed the partial remainder is below 2^k, so before the
+final shift it is always under 2^31 and `2r + b` always fits. The cases that
+would have exposed it if the reasoning were wrong - `0xFFFFFFFF / 0x80000001`
+and friends - are in the suite explicitly.
+
+One gap rather than a bug: libsup exports only `__divu`, `__divs`, `__modu`
+and `__mods`. There is no 32x32 multiply helper, and the 68000 has no
+`mulu.l`. Nothing in the kernel multiplies two longs yet, so nothing reaches
+it; the first one that does will fail at link time rather than silently.
 
 **A bug reading the code had missed**, found by running it:
 `serial_put_decimal` was wrong for every multi-digit value. Its reversal loop

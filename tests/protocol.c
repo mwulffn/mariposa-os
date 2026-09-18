@@ -34,6 +34,8 @@ void t_fail(const char *fmt, ...)
     g_failed = 1;
 }
 
+int t_failed(void) { return g_failed; }
+
 void t_check_str(const char *file, int line, const char *expect, const char *actual)
 {
     char e[256], a[256];

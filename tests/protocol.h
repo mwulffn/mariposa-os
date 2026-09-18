@@ -44,6 +44,10 @@ typedef struct {
  * than once; the first failure is what gets reported. */
 void t_fail(const char *fmt, ...);
 
+/* True once the current test has recorded a failure. Lets a sweep stop at
+ * the first mismatch instead of printing thousands. */
+int  t_failed(void);
+
 void t_check_str (const char *file, int line, const char *expect, const char *actual);
 void t_check_u32 (const char *file, int line, const char *what,
                   uint32_t expect, uint32_t actual);
