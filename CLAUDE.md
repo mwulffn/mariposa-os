@@ -48,6 +48,14 @@ cd src/rom && make      # Build ROM independently
 cd src/kernel && make   # Build kernel independently
 ```
 
+**Containerised build (no host toolchain needed):**
+```bash
+make docker-build       # Build ROM + kernel inside a container
+```
+Builds vasm/vbcc/vlink from upstream source in an image and runs these
+Makefiles inside it. FS-UAE is not included, so `make run` and `./debug.py`
+still need a local install. See `docs/docker.md`.
+
 ## Project Structure
 
 ```
