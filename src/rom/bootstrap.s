@@ -169,7 +169,16 @@ start:
 ; install_exception_vectors - Install all exception handlers
 ; ============================================================
 install_exception_vectors:
-    movem.l a0-a1,-(sp)
+    movem.l d0/a0-a1,-(sp)
+
+    ; Fill every non-reserved vector with the generic handler FIRST.
+    ; Everything installed below lands inside this range ($30-$3FF), so
+    ; doing the fill afterwards would wipe the specific handlers out again.
+    lea     $0030,a0            ; Start after reserved vectors
+    move.w  #(256-12-1),d0      ; Remaining vectors
+.generic_loop:
+    move.l  #generic_handler,(a0)+
+    dbf     d0,.generic_loop
 
     ; Install specific exception handlers
     move.l  #bus_error_handler,VEC_BUS_ERROR
@@ -194,35 +203,27 @@ install_exception_vectors:
     move.l  #auto_vec_handler,VEC_AUTOVEC7
 
     ; Install TRAP handlers (0-15)
-    movem.l d0,-(sp)
     lea     VEC_TRAP0,a0
     moveq   #15,d0
 .trap_loop:
     move.l  #trap_handler,(a0)+
     dbf     d0,.trap_loop
 
-    ; Install generic handler for remaining vectors
-    lea     $0030,a0            ; Start after reserved vectors
-    move.w  #(256-12-1),d0      ; Remaining vectors
-.generic_loop:
-    move.l  #generic_handler,(a0)+
-    dbf     d0,.generic_loop
-
-    movem.l (sp)+,d0
-
-    movem.l (sp)+,a0-a1
+    movem.l (sp)+,d0/a0-a1
     rts
 
 ; ============================================================
 ; Exception Handlers
 ; ============================================================
+; Bus and address error are group 0 faults: the 68000 pushes SSW, access
+; address and IR ahead of the SR/PC pair, so they need the wide-frame entry.
 bus_error_handler:
     lea     bus_error_msg(pc),a0
-    jmp     panic_with_msg
+    jmp     panic_with_msg_group0
 
 address_error_handler:
     lea     addr_error_msg(pc),a0
-    jmp     panic_with_msg
+    jmp     panic_with_msg_group0
 
 illegal_handler:
     lea     illegal_msg(pc),a0
