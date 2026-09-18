@@ -96,6 +96,11 @@ line protocol and the exit code is the verdict (0 pass, 1 test failed,
 2 harness error). Prefer this tier for anything that is pure logic; use
 FS-UAE only for behaviour that needs real hardware.
 
+Covers sprintf/serial formatting, the exception vector table and panic frame
+decoding, and the whole storage path — `ide.s`, `partition.s` and
+`filesystem.s` — against a generated disk image with an RDB, a partition and
+a FAT16 filesystem. No `boot.hdf` or mtools needed.
+
 **Full guide:** See `docs/testing.md`
 
 ## Documentation

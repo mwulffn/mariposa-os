@@ -16,11 +16,11 @@ TARGET = $(BUILD)/run-tests
 CC ?= cc
 
 # Our code is linted hard. Musashi is third party and is not.
-CFLAGS_TEST    = -std=c99 -O1 -g -Wall -Wextra -I. -I$(MUSASHI_DIR)
+CFLAGS_TEST    = -std=c99 -O1 -g -Wall -Wextra -I. -I$(BUILD) -I$(MUSASHI_DIR)
 CFLAGS_MUSASHI = -O2 -g -w -I$(MUSASHI_DIR)
 LDLIBS         = -lm
 
-TEST_SRC = main.c protocol.c harness.c test_format.c test_vectors.c
+TEST_SRC = main.c protocol.c harness.c test_format.c test_vectors.c test_disk.c
 TEST_OBJ = $(TEST_SRC:%.c=$(BUILD)/%.o)
 
 MUSASHI_OBJ = $(BUILD)/m68kcpu.o $(BUILD)/m68kdasm.o $(BUILD)/m68kops.o \
@@ -35,14 +35,22 @@ all: $(TARGET)
 # Exit code is the verdict: 0 all passed, 1 a test failed, 2 harness error.
 # FILTER=substring narrows the run to matching "suite.test" names.
 FILTER ?=
-run: $(TARGET)
-	@./$(TARGET) --rom $(ROM) --sym $(SYM) $(if $(FILTER),--filter $(FILTER),)
+run: $(TARGET) $(DISK_STAMP)
+	@./$(TARGET) --rom $(ROM) --sym $(SYM) --diskdir $(BUILD) $(if $(FILTER),--filter $(FILTER),)
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
 $(TARGET): $(TEST_OBJ) $(MUSASHI_OBJ) | $(BUILD)
 	$(CC) -o $@ $(TEST_OBJ) $(MUSASHI_OBJ) $(LDLIBS)
+
+# Disk images and the layout header the disk tests assert against.
+DISK_STAMP = $(BUILD)/disk_layout.h
+
+$(DISK_STAMP): mkdisk.py | $(BUILD)
+	@python3 mkdisk.py $(BUILD)
+
+$(BUILD)/test_disk.o: $(DISK_STAMP)
 
 $(BUILD)/%.o: %.c $(MUSASHI_STAMP) | $(BUILD)
 	$(CC) $(CFLAGS_TEST) -c -o $@ $<

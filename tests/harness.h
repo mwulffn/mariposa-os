@@ -137,4 +137,30 @@ size_t      h_serial_len(void);
  */
 void h_serial_input(const char *s);
 
+/* --- IDE disk ------------------------------------------------------------
+ *
+ * A Gayle-mapped ATA register model over a raw image file, enough for the
+ * READ SECTORS path that ide.s implements: LBA28, PIO, no interrupts, no
+ * DMA, BSY never asserted.
+ *
+ * With no image attached the status register reads $7F, which is what ide.s
+ * treats as "no drive" - so tests that do not care about disks are
+ * unaffected, and none of them hang.
+ *
+ * A word read of the data port returns the two bytes in disk order, high
+ * byte first, so that a `move.w IDE_DATA,(a0)+` leaves memory holding the
+ * sector byte for byte. That is what makes both the big-endian RDB compare
+ * and the little-endian FAT parsing work off the same buffer.
+ */
+
+/* Returns 0 on success. Attaching replaces any previous image. Note h_reset()
+ * detaches, so attach inside the test, after reset. */
+int      h_attach_disk(const char *path);
+void     h_detach_disk(void);
+uint32_t h_disk_sectors(void);
+
+/* Read a sector straight out of the host-side image, for building the
+ * expectation a test compares the guest's result against. */
+int      h_disk_read(uint32_t lba, void *buf512);
+
 #endif /* HARNESS_H */

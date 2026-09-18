@@ -105,12 +105,190 @@ static int stub_region(uint32_t addr, uint32_t *read_value)
     /* Zorro II autoconfig space: $FF from register 0 means "no card". */
     if (addr >= 0xE80000u && addr < 0xE90000u) { *read_value = 0xFF; return 1; }
 
-    /* Gayle IDE. $7F is the status the ROM reads as "no drive", which makes
-     * ide_test_read bail cleanly. Replace this with a disk model to test
-     * ide.s / partition.s / filesystem.s headlessly. */
-    if (addr >= 0xDA0000u && addr < 0xDA2000u) { *read_value = 0x7F; return 1; }
-
     return 0;
+}
+
+/* ------------------------------------------------------------- Gayle IDE */
+
+#define IDE_BASE     0xDA0000u
+#define IDE_END      0xDA2000u
+#define IDE_DATA     0xDA0002u
+#define IDE_ERROR    0xDA0006u
+#define IDE_NSECTOR  0xDA000Au
+#define IDE_SECTOR   0xDA000Eu
+#define IDE_LCYL     0xDA0012u
+#define IDE_HCYL     0xDA0016u
+#define IDE_SELECT   0xDA001Au
+#define IDE_STATUS   0xDA001Eu        /* command on write */
+
+#define ATA_ERR      0x01
+#define ATA_DRQ      0x08
+#define ATA_DRDY     0x40
+#define ATA_BSY      0x80
+#define ATA_CMD_READ 0x20
+
+#define NO_DRIVE     0x7F             /* what an empty bus floats to */
+
+static uint8_t  *g_disk;
+static uint32_t  g_disk_sectors;
+
+static uint8_t   g_ata_lba[4];
+static uint8_t   g_ata_nsector;
+static uint8_t   g_ata_select;
+static uint8_t   g_ata_error;
+static uint32_t  g_ata_next_lba;
+static int       g_ata_left;
+static uint8_t   g_ata_buf[512];
+static int       g_ata_pos;
+static int       g_ata_drq;
+static int       g_ata_err;
+
+int h_attach_disk(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    long size;
+
+    h_detach_disk();
+
+    if (!f) {
+        fprintf(stderr,
+            "harness: cannot open disk image '%s'\n"
+            "         generate it first: python3 tests/mkdisk.py tests/build\n",
+            path);
+        return 2;
+    }
+    fseek(f, 0, SEEK_END);
+    size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (size <= 0 || (size % 512) != 0) {
+        fprintf(stderr, "harness: disk image '%s' is not a whole number of sectors\n",
+                path);
+        fclose(f);
+        return 2;
+    }
+    g_disk = malloc((size_t)size);
+    if (!g_disk || fread(g_disk, 1, (size_t)size, f) != (size_t)size) {
+        fprintf(stderr, "harness: short read on disk image '%s'\n", path);
+        fclose(f);
+        free(g_disk);
+        g_disk = NULL;
+        return 2;
+    }
+    fclose(f);
+    g_disk_sectors = (uint32_t)(size / 512);
+    return 0;
+}
+
+void h_detach_disk(void)
+{
+    free(g_disk);
+    g_disk = NULL;
+    g_disk_sectors = 0;
+    g_ata_drq = g_ata_err = g_ata_left = g_ata_pos = 0;
+    g_ata_error = 0;
+    memset(g_ata_lba, 0, sizeof g_ata_lba);
+    g_ata_nsector = 0;
+    g_ata_select = 0;
+}
+
+uint32_t h_disk_sectors(void) { return g_disk_sectors; }
+
+int h_disk_read(uint32_t lba, void *buf512)
+{
+    if (!g_disk || lba >= g_disk_sectors) return -1;
+    memcpy(buf512, g_disk + (size_t)lba * 512, 512);
+    return 0;
+}
+
+static void ata_load_next_sector(void)
+{
+    if (g_ata_left <= 0 || g_ata_next_lba >= g_disk_sectors) {
+        g_ata_drq = 0;
+        return;
+    }
+    memcpy(g_ata_buf, g_disk + (size_t)g_ata_next_lba * 512, 512);
+    g_ata_next_lba++;
+    g_ata_pos = 0;
+    g_ata_drq = 1;
+}
+
+static void ata_command(uint8_t cmd)
+{
+    uint32_t lba;
+    int count;
+
+    g_ata_err = 0;
+    g_ata_error = 0;
+    g_ata_drq = 0;
+
+    if (cmd != ATA_CMD_READ) {
+        g_ata_err = 1;
+        g_ata_error = 0x04;                       /* ABRT */
+        return;
+    }
+    lba = (uint32_t)g_ata_lba[0]
+        | ((uint32_t)g_ata_lba[1] << 8)
+        | ((uint32_t)g_ata_lba[2] << 16)
+        | ((uint32_t)(g_ata_select & 0x0F) << 24);
+    count = g_ata_nsector ? g_ata_nsector : 256;  /* 0 means 256 in ATA */
+
+    if (lba + (uint32_t)count > g_disk_sectors) {
+        g_ata_err = 1;
+        g_ata_error = 0x10;                       /* IDNF */
+        return;
+    }
+    g_ata_next_lba = lba;
+    g_ata_left = count;
+    ata_load_next_sector();
+}
+
+static uint32_t ide_read(uint32_t addr, int size)
+{
+    if (!g_disk)
+        return NO_DRIVE;
+
+    if (addr == IDE_DATA && size == 2) {
+        uint32_t v;
+        if (!g_ata_drq) {
+            fault("IDE data read with DRQ clear (pc $%06X)",
+                  m68k_get_reg(NULL, M68K_REG_PPC));
+            return 0;
+        }
+        /* High byte first, so a move.w into memory reproduces disk order. */
+        v = ((uint32_t)g_ata_buf[g_ata_pos] << 8) | g_ata_buf[g_ata_pos + 1];
+        g_ata_pos += 2;
+        if (g_ata_pos >= 512) {
+            g_ata_left--;
+            ata_load_next_sector();
+        }
+        return v;
+    }
+    if (addr == IDE_STATUS)
+        return (uint32_t)(ATA_DRDY
+                          | (g_ata_drq ? ATA_DRQ : 0)
+                          | (g_ata_err ? ATA_ERR : 0));
+    if (addr == IDE_ERROR)   return g_ata_error;
+    if (addr == IDE_NSECTOR) return g_ata_nsector;
+    if (addr == IDE_SECTOR)  return g_ata_lba[0];
+    if (addr == IDE_LCYL)    return g_ata_lba[1];
+    if (addr == IDE_HCYL)    return g_ata_lba[2];
+    if (addr == IDE_SELECT)  return g_ata_select;
+    return 0;
+}
+
+static void ide_write(uint32_t addr, int size, uint32_t val)
+{
+    (void)size;
+    if (!g_disk)
+        return;
+
+    if      (addr == IDE_NSECTOR) g_ata_nsector = (uint8_t)val;
+    else if (addr == IDE_SECTOR)  g_ata_lba[0]  = (uint8_t)val;
+    else if (addr == IDE_LCYL)    g_ata_lba[1]  = (uint8_t)val;
+    else if (addr == IDE_HCYL)    g_ata_lba[2]  = (uint8_t)val;
+    else if (addr == IDE_SELECT)  g_ata_select  = (uint8_t)val;
+    else if (addr == IDE_STATUS)  ata_command((uint8_t)val);   /* command port */
 }
 
 static uint32_t custom_read(uint32_t addr, int size)
@@ -165,6 +343,8 @@ static uint32_t cpu_read(uint32_t addr, int size)
     }
     if (addr >= CUSTOM_BASE && addr < CUSTOM_BASE + 0x200u)
         return custom_read(addr, size);
+    if (addr >= IDE_BASE && addr < IDE_END)
+        return ide_read(addr, size);
     if (stub_region(addr, &stub))
         return stub;
     if ((p = raw_ptr(addr, NULL)) != NULL)
@@ -190,6 +370,10 @@ static void cpu_write(uint32_t addr, int size, uint32_t val)
     }
     if (addr >= CUSTOM_BASE && addr < CUSTOM_BASE + 0x200u) {
         custom_write(addr, size, val);
+        return;
+    }
+    if (addr >= IDE_BASE && addr < IDE_END) {
+        ide_write(addr, size, val);
         return;
     }
     if (stub_region(addr, &stub))
@@ -447,6 +631,8 @@ void h_reset(void)
     memset(g_chip, 0, H_CHIP_SIZE);
     memset(g_fast, 0, H_FAST_SIZE);
 
+    h_detach_disk();
+
     g_tx_len = 0;
     g_rx_len = g_rx_pos = 0;
     g_fault_count = 0;
@@ -510,6 +696,7 @@ int h_init(const char *rom_path, const char *sym_path)
 
 void h_shutdown(void)
 {
+    h_detach_disk();
     free(g_chip); free(g_fast); free(g_rom); free(g_syms);
     g_chip = g_fast = g_rom = NULL; g_syms = NULL; g_nsyms = 0;
 }

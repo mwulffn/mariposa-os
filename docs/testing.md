@@ -4,7 +4,7 @@ Two tiers. The fast one needs no Amiga at all.
 
 | Tier | What it covers | Cost | Command |
 |------|----------------|------|---------|
-| Headless CPU | ROM routines, as real 68000 code | ~40ms for the whole suite | `make test` |
+| Headless CPU | ROM routines, as real 68000 code, incl. the whole IDE/RDB/FAT16 path | ~70ms for the whole suite | `make test` |
 | FS-UAE | Boot path, real hardware behaviour | seconds, needs a display | `./debug.py`, `test_*.py` |
 
 Everything that is pure logic belongs in the first tier. Reserve the emulator
@@ -105,23 +105,71 @@ recorded as a fault and fails the test, rather than silently reading zero.
   reported by name.
 - **Misaligned access** is caught in the memory callbacks: a word or long
   access to an odd address is an address error on a 68000 and fails the test.
-- **Stubs** that exist only to stop routines hanging: CIA-A/B, Zorro
-  autoconfig space (reports no card), Gayle IDE (reports no drive).
+- **A Gayle-mapped ATA disk** over a raw image file: the LBA28 PIO read path
+  `ide.s` implements, with BSY never asserted and no interrupts or DMA. With
+  no image attached the status register reads `$7F`, which `ide.s` treats as
+  "no drive", so tests that do not care about disks are unaffected and none
+  of them hang.
+- **Stubs** that exist only to stop routines hanging: CIA-A/B and Zorro
+  autoconfig space (reports no card).
 
 One deliberate deviation from hardware: the model clears RBF when the guest
 reads `SERDATR` as a word, whereas Paula needs an `INTREQ` write to ack.
 Without it `serial_get_char`, which never acks, would spin forever. A test of
 the ack path itself has to check `INTREQ` directly.
 
-### Adding IDE and FAT16 coverage
+### The disk tier
 
-`stub_region()` in `harness.c` is the seam. Back the Gayle range with a real
-ATA register model over a disk image file and `ide.s`, `partition.s` and
-`filesystem.s` become testable headlessly, with no `boot.hdf` and no emulator.
+`tests/mkdisk.py` builds the images: a raw IDE disk carrying an Amiga Rigid
+Disk Block, one partition, and a FAT16 filesystem with `SYSTEM.BIN` on it —
+exactly the shape `partition.s` and `filesystem.s` expect. No `boot.hdf`, no
+mtools, no emulator. It also emits `disk_layout.h`, so the tests assert
+against the values actually written rather than a second, drifting copy.
+
+Two properties of the generated image do real work:
+
+- **`SYSTEM.BIN`'s cluster chain is scattered, not contiguous** (2, 9, 3, 15,
+  4, …), so a broken `fat16_get_next_cluster` cannot pass by reading straight
+  through.
+- **Its contents are position dependent**, so clusters loaded out of order or
+  skipped are detectable byte for byte.
+
+The root directory also carries a volume label, a deleted entry and a second
+file ahead of `SYSTEM.BIN`, so the directory scan has something to skip. That
+second file's FAT entry sits in a different FAT sector from the chain's,
+which is the only thing that makes the single-sector FAT cache in
+`fat16_get_next_cluster` reload.
+
+There is no mtools here to cross-check the image against, so `mkdisk.py`
+self-checks: it re-reads what it wrote through the BPB rather than through
+its own constants, walks the FAT chain, and reassembles the file. The ROM's
+parser agreeing with an independently written reader is the evidence that
+the layout is right.
+
+**The byte order detail that makes it work.** A word read of the data port
+returns the two bytes high byte first, so a `move.w IDE_DATA,(a0)+` leaves
+memory holding the sector byte for byte. That is what lets the big-endian
+RDB compare (`move.l` against `'RDSK'`) and the little-endian FAT parsing
+(assembled byte by byte) both work off the same buffer. Get it backwards and
+one of the two breaks — which is exactly the bug class this tier exists to
+catch.
 
 ## What the suite found
 
-Building it turned up a bug that reading the code had missed:
+The storage path is in better shape than the formatting code: `ide.s`,
+`find_rdb`, the FAT16 boot-sector parse, the directory scan, the chain walk
+and `load_system_bin` all pass against a real generated image, including
+loading all 5000 bytes of a ten-cluster scattered file to `$200000` in the
+right order.
+
+The one disk failure is the LBA overflow. `load_partition` computes
+`LowCyl * Heads * Sectors` with `mulu.w`, so the `LowCyl * Heads`
+intermediate truncates to 16 bits. With the test image's 20000 cylinders and
+4 heads, 80000 becomes 14464 and the start LBA comes out as `$71000` instead
+of `$271000`. In practice that means any partition starting more than roughly
+2GB into a disk is read from the wrong place.
+
+Building the first tier turned up a bug that reading the code had missed:
 `serial_put_decimal` is wrong for every multi-digit value. Its reversal loop
 decrements the tail pointer before storing the saved byte, so it writes to the
 wrong index, and it then prints from the advanced head pointer rather than the
