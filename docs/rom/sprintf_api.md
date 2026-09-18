@@ -1,16 +1,14 @@
-# Sprintf API Documentation
+# Sprintf API
 
-## Overview
-
-The ROM provides stack-based `Sprintf` and `SerialPrintf` functions for formatted debug output. These functions simplify debug printing by eliminating the need for multiple function calls and manual buffer management.
+Stack-based formatted output for ROM debug messages. Implemented in
+`src/rom/sprintf.s`, covered by the `format.*` tests in `tests/test_format.c`.
 
 ## Functions
 
-### Sprintf
+### SerialPrintf
 
-Formats a string with arguments into a 256-byte buffer at `$3400`.
+Format and send to the serial port. **This is the entry point to use.**
 
-**Stack Layout (caller pushes right-to-left):**
 ```
 SP+0:  Return address
 SP+4:  Format string pointer
@@ -18,77 +16,86 @@ SP+8:  First argument
 SP+12: Second argument, etc.
 ```
 
-**Returns:**
-- `A0` = pointer to `SPRINTF_BUFFER` ($3400)
-- `D0.l` = string length
-- All other registers preserved
+Caller pushes right to left and cleans up. Returns nothing. All registers
+preserved.
 
-### SerialPrintf
+### Sprintf
 
-Convenience wrapper that calls `Sprintf` followed by `SerialPutString`.
+Formats into `SPRINTF_BUFFER` ($3400, 256 bytes) and returns `A0` = buffer,
+`D0.l` = length.
 
-**Stack Layout:** Same as `Sprintf`
+> **Not callable directly.** `Sprintf` reads its format pointer at a fixed
+> stack offset that assumes it was reached by `bsr` from `SerialPrintf`. A
+> direct `bsr Sprintf` picks up the first argument as the format string.
+> Use `SerialPrintf`, or fix the offset first if you need a string back.
 
-**Returns:** Nothing (output sent to serial port)
-
-## Format Specifiers
-
-### Basic Syntax
+## Format syntax
 
 ```
-%[width][.size]specifier
+%[width][.size]specifier[.size]
 ```
 
-### Specifiers
+| Specifier | Description | Default |
+|-----------|-------------|---------|
+| `%x` | Hexadecimal, uppercase | long, 8 digits |
+| `%d` | Unsigned decimal, full 32-bit range | — |
+| `%b` | Binary | long, 32 digits |
+| `%s` | Null-terminated string | — |
+| `%%` | Literal `%` | — |
 
-| Specifier | Description | Example Input | Example Output |
-|-----------|-------------|---------------|----------------|
-| `%x` | Hexadecimal (uppercase A-F) | `$12AB` | `12AB` |
-| `%d` | Unsigned decimal | `42` | `42` |
-| `%b` | Binary | `$5` | `0101` |
-| `%s` | Null-terminated string | `"Hello"` | `Hello` |
-| `%%` | Literal '%' character | N/A | `%` |
+### Size modifier
 
-### Size Modifiers
+Accepted on **either side** of the specifier — `%x.b` and `%.bx` are the same
+thing. Most callers in this ROM write the suffix form; `memory.s` writes the
+prefix form.
 
-| Size | Description | Default Width |
-|------|-------------|---------------|
-| `.b` | Byte (8-bit) | 2 hex, 8 binary |
-| `.w` | Word (16-bit) | 4 hex, 16 binary |
-| `.l` | Long (32-bit) | 8 hex (default) |
+| Size | Hex digits | Binary digits |
+|------|-----------|---------------|
+| `.b` | 2 | 8 |
+| `.w` | 4 | 16 |
+| `.l` | 8 (default) | 32 (default) |
 
-### Width Modifier
+A suffix is only consumed after `%x` and `%b`, where a size means something,
+and only when a size letter actually follows the dot. So these keep their
+dots as literal text:
 
-Pads output with leading zeros to specified width (0-9 digits).
+```
+"%s.bin"   ->  SYSTEM.bin
+"%d.log"   ->  3.log
+"v%d.%d"   ->  v1.5
+"%x.txt"   ->  0000002A.txt
+```
+
+### Width modifier
+
+One or more digits before the specifier, clamped to 8. Output is always zero
+filled to the digit count, so `%08x` and `%8x` are equivalent — the leading
+zero is decoration, not a flag. Applies to hex only.
 
 | Format | Value | Output |
 |--------|-------|--------|
-| `%x.l` | `$1234` | `00001234` |
-| `%8x` | `$1234` | `00001234` |
-| `%4x.w` | `$AB` | `00AB` |
-| `%2x.b` | `$F` | `0F` |
+| `%x` | `$1234` | `00001234` |
+| `%08x` | `$1234` | `00001234` |
+| `%4x` | `$DEADBEEF` | `BEEF` |
+| `%08x.b` | `$DEADBEAB` | `000000AB` |
 
-**Note:** Width overrides default size width.
+## Arguments are always longwords
+
+**Every argument occupies one 32-bit stack slot, whatever size you ask to
+display.** The size modifier narrows the value for printing; it does not
+change how much stack the argument takes. Push bytes and words as longs.
+
+```asm
+    move.l  d1,-(sp)            ; second argument, a full long
+    move.l  d0,-(sp)            ; first argument, a full long
+    pea     .fmt(pc)
+    bsr     SerialPrintf
+    lea     12(sp),sp           ; 4 + 4 + 4
+```
 
 ## Examples
 
-### Example 1: Basic Hex Output
-
-```asm
-    move.l  d0,-(sp)            ; Push value
-    pea     .fmt(pc)            ; Push format string
-    bsr     Sprintf
-    addq.l  #8,sp               ; Clean stack
-    bsr     SerialPutString     ; A0 already points to buffer
-
-.fmt:
-    dc.b    "D0: $%x.l",10,13,0
-    even
-```
-
-**Output:** `D0: $12345678`
-
-### Example 2: Using SerialPrintf (Simpler)
+### Hex and decimal
 
 ```asm
     move.l  d0,-(sp)
@@ -101,48 +108,50 @@ Pads output with leading zeros to specified width (0-9 digits).
     even
 ```
 
-**Output:** `D0: $12345678`
+Output: `D0: $12345678`
 
-### Example 3: Multiple Arguments
+### Multiple arguments
 
 ```asm
-    move.l  d1,-(sp)            ; Second value
-    move.l  d0,-(sp)            ; First value
+    move.l  d1,-(sp)
+    move.l  d0,-(sp)
     pea     .fmt(pc)
     bsr     SerialPrintf
-    lea     12(sp),sp           ; Clean 3 items (4+4+4 bytes)
+    lea     12(sp),sp
 
 .fmt:
     dc.b    "D0=$%x.l D1=$%x.l",10,13,0
     even
 ```
 
-**Output:** `D0=$12345678 D1=$ABCDEF00`
+Output: `D0=$12345678 D1=$ABCDEF00`
 
-### Example 4: Mixed Formats
+### Mixed sizes
 
 ```asm
-    move.w  #$AB,-(sp)          ; Byte value (pushed as word)
-    move.l  #42,-(sp)           ; Decimal value
+    moveq   #0,d0
+    move.b  status,d0
+    move.l  d0,-(sp)            ; byte value, still a long on the stack
+    move.l  #42,-(sp)
     pea     .fmt(pc)
     bsr     SerialPrintf
-    lea     10(sp),sp           ; Clean up (4+4+2 = 10 bytes)
+    lea     12(sp),sp           ; 4 + 4 + 4, not 4 + 4 + 2
 
 .fmt:
     dc.b    "Count: %d, Status: $%x.b",10,13,0
     even
 ```
 
-**Output:** `Count: 42, Status: $AB`
+Output: `Count: 42, Status: $AB`
 
-### Example 5: Binary and String
+### Binary and string
 
 ```asm
-    pea     .str(pc)            ; String pointer
-    move.w  #%10101010,-(sp)    ; Binary value
+    move.l  #%10101010,-(sp)
+    pea     .str(pc)
     pea     .fmt(pc)
     bsr     SerialPrintf
-    lea     10(sp),sp
+    lea     12(sp),sp
 
 .fmt:
     dc.b    "%s: %b.b",10,13,0
@@ -151,166 +160,28 @@ Pads output with leading zeros to specified width (0-9 digits).
     even
 ```
 
-**Output:** `Flags: 10101010`
+Output: `Flags: 10101010`
 
-### Example 6: Width Padding
+## Implementation notes
 
-```asm
-    move.l  #$1234,-(sp)
-    pea     .fmt(pc)
-    bsr     SerialPrintf
-    addq.l  #8,sp
+**Buffer:** `SPRINTF_BUFFER` at $3400, 256 bytes, shared with
+`serial_put_hex32` and `serial_put_decimal`.
 
-.fmt:
-    dc.b    "Address: $%08x",10,13,0
-    even
-```
+**Decimal:** `%d` handles the full unsigned 32-bit range. It divides through
+`divu32_10` in `src/rom/math.s`, because the 68000's `divu.w` is 32/16 → 16
+and overflows for any value from 655360 up.
 
-**Output:** `Address: $00001234`
+**Unknown specifiers** are dropped and their argument is *not* consumed, so
+everything after them is misaligned. There is no diagnostic for this.
 
-## Common Patterns
-
-### Debug Register Dump
-
-```asm
-DebugDumpRegs:
-    movem.l d0-d1/a0,-(sp)
-
-    move.l  d0,-(sp)
-    pea     .d0_fmt(pc)
-    bsr     SerialPrintf
-    addq.l  #8,sp
-
-    move.l  d1,-(sp)
-    pea     .d1_fmt(pc)
-    bsr     SerialPrintf
-    addq.l  #8,sp
-
-    movem.l (sp)+,d0-d1/a0
-    rts
-
-.d0_fmt:
-    dc.b    "D0: $%x.l",10,13,0
-.d1_fmt:
-    dc.b    "D1: $%x.l",10,13,0
-    even
-```
-
-### Memory Dump Line
-
-```asm
-    move.l  (a0),-(sp)          ; Memory value
-    move.l  a0,-(sp)            ; Address
-    pea     .fmt(pc)
-    bsr     SerialPrintf
-    lea     12(sp),sp
-
-.fmt:
-    dc.b    "$%x.l: $%x.l",10,13,0
-    even
-```
-
-**Output:** `$00080000: $12345678`
-
-### Status Message with Hex Value
-
-```asm
-    move.l  d0,-(sp)
-    pea     .msg(pc)
-    bsr     SerialPrintf
-    addq.l  #8,sp
-
-.msg:
-    dc.b    "Chip RAM detected: $%x.l bytes",10,13,0
-    even
-```
-
-## Implementation Notes
-
-### Buffer Location
-
-- Output buffer: `SPRINTF_BUFFER` at `$3400`
-- Size: 256 bytes
-- Shared by `Sprintf`, `SerialPutHex32`, and `SerialPutDecimal`
-
-### Register Usage
-
-`Sprintf` preserves all registers except:
-- `A0` = buffer pointer (return value)
-- `D0.l` = string length (return value)
-
-### Stack Alignment
-
-Arguments should be aligned:
-- Byte values: push as words (2 bytes minimum)
-- Word values: push as words (2 bytes)
-- Long values: push as longs (4 bytes)
-- Pointers: push as longs (4 bytes)
-
-### Cleanup
-
-Caller must clean the stack after the call:
-```asm
-    ; Example: 2 longs + format pointer
-    move.l  arg2,-(sp)      ; 4 bytes
-    move.l  arg1,-(sp)      ; 4 bytes
-    pea     format          ; 4 bytes
-    bsr     SerialPrintf
-    lea     12(sp),sp       ; Clean 12 bytes total
-```
-
-### Null Termination
-
-`Sprintf` always null-terminates the output string.
-
-## Migration from Old API
-
-### Before (Multiple Calls)
-
-```asm
-    lea     .msg(pc),a0
-    bsr     SerialPutString
-    move.b  #'$',d0
-    bsr     SerialPutChar
-    move.l  d0,d0
-    bsr     SerialPutHex32
-    lea     .nl(pc),a0
-    bsr     SerialPutString
-
-.msg:  dc.b "Value: ",0
-.nl:   dc.b 10,13,0
-```
-
-### After (Single Call)
-
-```asm
-    move.l  d0,-(sp)
-    pea     .fmt(pc)
-    bsr     SerialPrintf
-    addq.l  #8,sp
-
-.fmt:
-    dc.b    "Value: $%x.l",10,13,0
-    even
-```
+**No bounds checking.** Output beyond 256 bytes runs past the end of the
+buffer. Nothing enforces the limit.
 
 ## Limitations
 
-- Maximum output length: 255 bytes (256 - null terminator)
-- Width specifier: single digit only (0-9)
-- No floating point support
-- No signed decimal (only unsigned)
+- No signed decimal — `%d` is unsigned only
 - No lowercase hex
-- Format string must be in accessible memory (ROM or RAM)
-
-## Error Handling
-
-`Sprintf` does not validate:
-- Format string correctness
-- Argument count matching format specifiers
-- Buffer overflow (output silently truncated at 255 bytes)
-
-Caller must ensure:
-- Format string is null-terminated
-- Correct number and type of arguments
-- Output fits in 256 bytes
+- No floating point
+- Width applies to hex only, not binary or decimal
+- `Sprintf` is not directly callable (see above)
+- No buffer overflow protection

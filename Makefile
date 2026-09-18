@@ -25,7 +25,8 @@ else
     FS_UAE ?= fs-uae
 endif
 
-.PHONY: all rom kernel deploy run run-open clean
+.PHONY: all rom kernel deploy run run-open clean test test-clean
+.PHONY: docker-image docker-image-refresh docker-build docker-make docker-shell docker-versions
 
 all: rom kernel
 
@@ -48,6 +49,78 @@ run: rom deploy
 run-open: rom deploy
 	open -a "FS-UAE" --args "$(PWD)/$(CONFIG)"
 
+# ---------------------------------------------------------------------------
+# Headless tests
+# ---------------------------------------------------------------------------
+# Runs real ROM code under a 68000 CPU simulator: no emulator, no display, no
+# serial port, whole suite in well under a second. Output is the ### protocol
+# (see docs/testing.md); the exit code is the verdict.
+#
+#   make test                       run everything
+#   make test FILTER=rom.panic      run one group while iterating
+# ---------------------------------------------------------------------------
+FILTER ?=
+
+test: rom
+	@$(MAKE) -C tests run FILTER="$(FILTER)"
+
+test-clean:
+	$(MAKE) -C tests clean
+
 clean:
 	$(MAKE) -C $(ROM_DIR) clean
 	$(MAKE) -C $(KERNEL_DIR) clean
+	$(MAKE) -C tests clean
+
+# ---------------------------------------------------------------------------
+# Containerised build
+# ---------------------------------------------------------------------------
+# Builds vasm/vbcc/vlink from upstream source into an image, then runs these
+# same Makefiles inside it against a bind mount of the working tree. Output
+# lands in the usual build/ directories, owned by you rather than by root.
+#
+# No host toolchain required. FS-UAE is deliberately not in the image, so
+# `make run` and ./debug.py still need a local install.
+#
+#   make docker-build            build ROM + kernel in the container
+#   make docker-make DOCKER_TARGET=clean   run any target in the container
+#   make docker-shell            interactive shell with the toolchain on PATH
+#   make docker-versions         show which tool releases the image has
+#   make docker-image-refresh    re-fetch the toolchain, ignoring layer cache
+# ---------------------------------------------------------------------------
+DOCKER         ?= docker
+DOCKER_IMAGE   ?= mariposa-os-build
+DOCKER_TARGET  ?= all
+
+# Run as the invoking uid/gid so build artifacts are not root-owned on the
+# host. The build context is docker/ - the sources come in via the mount, so
+# nothing large is ever shipped to the daemon.
+DOCKER_RUN = $(DOCKER) run --rm \
+	-u $$(id -u):$$(id -g) \
+	-v "$(CURDIR)":/work \
+	-w /work \
+	$(DOCKER_IMAGE)
+
+docker-image:
+	$(DOCKER) build -t $(DOCKER_IMAGE) docker
+
+# The toolchain URLs are unversioned "latest" tarballs, so Docker's layer
+# cache would otherwise keep handing you the release you first built with.
+docker-image-refresh:
+	$(DOCKER) build --no-cache -t $(DOCKER_IMAGE) docker
+
+docker-build: docker-image
+	$(DOCKER_RUN) make all
+
+docker-make: docker-image
+	$(DOCKER_RUN) make $(DOCKER_TARGET)
+
+docker-shell: docker-image
+	$(DOCKER) run --rm -it \
+		-u $$(id -u):$$(id -g) \
+		-v "$(CURDIR)":/work \
+		-w /work \
+		$(DOCKER_IMAGE) bash
+
+docker-versions: docker-image
+	$(DOCKER_RUN) cat /opt/amiga-toolchain/VERSIONS

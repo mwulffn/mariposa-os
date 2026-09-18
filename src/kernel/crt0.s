@@ -15,9 +15,11 @@
         xref    __bss_end
 
 _start:
-        ; save ROM parameters before we clobber registers
+        ; stash ROM parameters before we clobber registers. Both go on the
+        ; stack, not into .bss - _rom_panic lives in .bss and the clear
+        ; below would zero it straight back out again.
         move.l  a0,-(sp)                ; save memmap pointer
-        move.l  a1,_rom_panic           ; save panic function
+        move.l  a1,-(sp)                ; save panic function
 
         ; clear .bss
         lea     __bss_start,a2
@@ -28,6 +30,10 @@ _start:
         clr.b   (a2)+
         bra.s   .clrbss
 .bss_done:
+
+        ; .bss is zeroed, so the panic vector can be published now
+        move.l  (sp)+,a1                ; restore panic function
+        move.l  a1,_rom_panic
 
         ; call kernel_main(memmap)
         move.l  (sp)+,a0                ; restore memmap pointer

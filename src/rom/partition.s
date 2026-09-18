@@ -259,9 +259,16 @@ load_partition:
 
     ; Calculate partition start LBA
     ; Start LBA = LowCyl * Heads * Sectors
+    ;
+    ; Not chained mulu.w: that is 16x16, so the LowCyl*Heads intermediate
+    ; truncates to 16 bits and any partition starting more than roughly
+    ; 2GB into the disk gets read from the wrong place. Heads and Sectors
+    ; are taken as 16-bit, which is all the geometry ever holds.
     move.l  d5,d0                   ; LowCyl
-    mulu.w  d7,d0                   ; * Heads
-    mulu.w  d4,d0                   ; * Sectors
+    move.l  d7,d1                   ; Heads
+    bsr     mul32x16
+    move.l  d4,d1                   ; Sectors
+    bsr     mul32x16
     move.l  d0,d2                   ; Save start LBA in D2
 
     move.l  d0,-(sp)                ; Start LBA
@@ -274,8 +281,10 @@ load_partition:
     move.l  d6,d0                   ; HighCyl
     sub.l   d5,d0                   ; - LowCyl
     addq.l  #1,d0                   ; + 1 = number of cylinders
-    mulu.w  d7,d0                   ; * Heads
-    mulu.w  d4,d0                   ; * Sectors
+    move.l  d7,d1                   ; Heads
+    bsr     mul32x16
+    move.l  d4,d1                   ; Sectors
+    bsr     mul32x16
     move.l  d0,d3                   ; Save size in D3
 
     move.l  d0,-(sp)                ; Size in blocks

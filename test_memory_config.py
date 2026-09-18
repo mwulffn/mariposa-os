@@ -1,271 +1,302 @@
 #!/usr/bin/env python3
 """
-Test script to verify memory configuration using the debugger.
-Tests that Zorro II autoconfig and memory detection work correctly.
+Verify memory detection against the ROM's memory map table.
+
+Drives the ROM debugger over serial and checks MEMMAP_TABLE ($3250) entry by
+entry against what the machine is configured to have. Expectations are derived
+from the FS-UAE config that `make run` will actually launch - read out of the
+Makefile so the two cannot diverge - rather than hardcoded. Hardcoding is what
+made the previous version of this script rot: it read four variables at $460
+that the ROM has not used for a long time.
+
+This tier needs FS-UAE and a display. Anything that is pure logic belongs in
+the headless suite instead:  make test
+
+Usage: ./test_memory_config.py [config.fs-uae]
 """
 
+import os
+import re
+import signal
 import socket
 import subprocess
 import sys
 import time
-import os
-import signal
 
-class DebuggerTest:
-    def __init__(self):
-        self.emulator_proc = None
+# From src/rom/hardware.i
+MEMMAP_TABLE = 0x3250
+KERNEL_CHIP = 0x4000            # start of kernel-managed chip RAM
+FAST_BASE = 0x200000            # where Zorro II RAM is relocated to
+KERNEL_STACK_SIZE = 0x2000      # reserved at the top of fast RAM
+ROM_BASE = 0xFC0000
+ROM_SIZE = 0x40000
+
+MEM_TYPE_CHIP = 1
+MEM_TYPE_FAST = 2
+MEM_TYPE_ROM = 5
+MEM_TYPE_RESERVED = 6
+
+TYPE_NAME = {0: "End", 1: "Chip", 2: "Fast", 5: "ROM", 6: "Reserved"}
+
+ENTRY_LONGS = 3                 # base, size, (type << 16) | flags
+
+
+def config_from_makefile():
+    """Whichever config `make run` will launch."""
+    try:
+        m = re.search(r'^CONFIG\s*=\s*(\S+)', open('Makefile').read(), re.M)
+        if m:
+            return m.group(1)
+    except OSError:
+        pass
+    return 'configs/a600.fs-uae'
+
+
+def parse_config(path):
+    """Chip and fast RAM sizes in bytes, from an FS-UAE config."""
+    chip_kb = fast_kb = 0
+    for line in open(path):
+        m = re.match(r'\s*(chip_memory|fast_memory)\s*=\s*(\d+)', line)
+        if m:
+            if m.group(1) == 'chip_memory':
+                chip_kb = int(m.group(2))
+            else:
+                fast_kb = int(m.group(2))
+    return chip_kb * 1024, fast_kb * 1024
+
+
+def expected_entries(chip_bytes, fast_bytes):
+    """What build_memory_table in src/rom/memory.s should have produced."""
+    entries = [
+        (0x000000, KERNEL_CHIP, MEM_TYPE_RESERVED, 1, "reserved low chip"),
+        (KERNEL_CHIP, chip_bytes - KERNEL_CHIP, MEM_TYPE_CHIP, 1, "chip RAM"),
+    ]
+    if fast_bytes:
+        usable = fast_bytes - KERNEL_STACK_SIZE
+        entries.append((FAST_BASE, usable, MEM_TYPE_FAST, 1, "fast RAM"))
+        entries.append((FAST_BASE + usable, KERNEL_STACK_SIZE,
+                        MEM_TYPE_RESERVED, 1, "kernel stack"))
+    entries.append((ROM_BASE, ROM_SIZE, MEM_TYPE_ROM, 0, "ROM"))
+    entries.append((0, 0, 0, 0, "terminator"))
+    return entries
+
+
+class MemoryTest:
+    def __init__(self, config):
+        self.config = config
+        self.emulator = None
         self.sock = None
-        self.test_count = 0
-        self.pass_count = 0
-        self.fail_count = 0
+        self.boot_log = ""
+        self.passed = 0
+        self.failed = 0
 
-    def start_emulator(self):
-        """Start FS-UAE emulator."""
-        print("Starting FS-UAE...")
-        # Start FS-UAE via make run
-        self.emulator_proc = subprocess.Popen(
+    # --- reporting -------------------------------------------------------
+
+    def ok(self, what):
+        print("  PASS  %s" % what)
+        self.passed += 1
+
+    def bad(self, what, detail=""):
+        print("  FAIL  %s" % what)
+        if detail:
+            for line in detail.rstrip().split('\n'):
+                print("          %s" % line)
+        self.failed += 1
+
+    # --- emulator --------------------------------------------------------
+
+    def start(self):
+        print("Starting FS-UAE with %s ..." % self.config)
+        self.emulator = subprocess.Popen(
             ['make', 'run'],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            preexec_fn=os.setsid  # Create new process group for clean shutdown
-        )
-        # Give it time to start
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            preexec_fn=os.setsid)
         time.sleep(4)
 
-    def connect_debugger(self):
-        """Connect to the debugger serial port."""
-        print("Connecting to debugger...", end='', flush=True)
-        max_retries = 10
-        for i in range(max_retries):
+    def connect(self):
+        print("Connecting to the debugger on localhost:5555 ...", end='', flush=True)
+        for attempt in range(10):
             try:
-                # Create new socket for each attempt
                 if self.sock:
-                    try:
-                        self.sock.close()
-                    except:
-                        pass
+                    self.sock.close()
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.sock.connect(('localhost', 5555))
-                print(" Connected!")
-                # Wait for prompt
+                print(" connected")
                 time.sleep(1)
-                # Clear initial output
+                # Keep the boot output rather than discarding it - the printed
+                # memory map is worth checking too.
                 self.sock.settimeout(0.5)
                 try:
                     while True:
-                        self.sock.recv(4096)
+                        chunk = self.sock.recv(4096)
+                        if not chunk:
+                            break
+                        self.boot_log += chunk.decode('ascii', errors='replace')
                 except socket.timeout:
                     pass
                 self.sock.settimeout(5.0)
                 return True
             except (ConnectionRefusedError, OSError) as e:
-                if i < max_retries - 1:
+                if attempt < 9:
                     print('.', end='', flush=True)
                     time.sleep(1)
                 else:
-                    print(f" Failed! Error: {e}")
+                    print(" failed: %s" % e)
                     return False
         return False
 
-    def send_command(self, cmd):
-        """Send a command and get response."""
+    def command(self, cmd):
         self.sock.sendall((cmd + '\n').encode())
         time.sleep(0.3)
-        response = b''
+        out = b''
         self.sock.settimeout(1.0)
         try:
             while True:
                 chunk = self.sock.recv(4096)
                 if not chunk:
                     break
-                response += chunk
+                out += chunk
         except socket.timeout:
             pass
         self.sock.settimeout(5.0)
-        return response.decode('ascii', errors='replace')
+        return out.decode('ascii', errors='replace')
 
-    def test_memory_var(self, name, address, expected_value):
-        """Test a memory variable has the expected value."""
-        self.test_count += 1
-        print(f"\nTest {self.test_count}: {name} at ${address:08X}")
-
-        cmd = f"m.l ${address:X}"
-        response = self.send_command(cmd)
-        print(f"  Command: {cmd}")
-        print(f"  Response: {response.strip()}")
-
-        # Extract hex value from response (format: $XXXXXXXX: $YYYYYYYY)
-        try:
-            # Look for pattern like "$XXXXXXXX: $YYYYYYYY"
-            if ':' in response:
-                value_str = response.split(':')[1].strip().split()[0]
-                # Remove $ if present
-                value_str = value_str.replace('$', '')
-                actual_value = int(value_str, 16)
-
-                if actual_value == expected_value:
-                    print(f"  ✓ PASS: {name} = ${actual_value:08X}")
-                    self.pass_count += 1
-                    return True
-                else:
-                    print(f"  ✗ FAIL: Expected ${expected_value:08X}, got ${actual_value:08X}")
-                    self.fail_count += 1
-                    return False
-            else:
-                print(f"  ✗ FAIL: Could not parse response")
-                self.fail_count += 1
-                return False
-        except (ValueError, IndexError) as e:
-            print(f"  ✗ FAIL: Error parsing response: {e}")
-            self.fail_count += 1
-            return False
-
-    def test_memory_write(self, address, test_value):
-        """Test writing and reading back from memory."""
-        self.test_count += 1
-        print(f"\nTest {self.test_count}: Write/Read test at ${address:08X}")
-
-        # Write value
-        cmd = f"m ${address:X} {test_value:X}"
-        response = self.send_command(cmd)
-        print(f"  Write: {cmd}")
-
-        # Read back
-        cmd = f"m.l ${address:X}"
-        response = self.send_command(cmd)
-        print(f"  Read: {cmd}")
-        print(f"  Response: {response.strip()}")
-
-        try:
-            if ':' in response:
-                value_str = response.split(':')[1].strip().split()[0]
-                value_str = value_str.replace('$', '')
-                actual_value = int(value_str, 16)
-
-                if actual_value == test_value:
-                    print(f"  ✓ PASS: Write persisted (${actual_value:08X})")
-                    self.pass_count += 1
-                    return True
-                else:
-                    print(f"  ✗ FAIL: Expected ${test_value:08X}, got ${actual_value:08X}")
-                    self.fail_count += 1
-                    return False
-            else:
-                print(f"  ✗ FAIL: Could not parse response")
-                self.fail_count += 1
-                return False
-        except (ValueError, IndexError) as e:
-            print(f"  ✗ FAIL: Error parsing response: {e}")
-            self.fail_count += 1
-            return False
-
-    def test_memory_map(self):
-        """Test reading the memory map."""
-        self.test_count += 1
-        print(f"\nTest {self.test_count}: Memory map")
-
-        cmd = "m $3250"
-        response = self.send_command(cmd)
-        print(f"  Command: {cmd}")
-        print(f"  Response:")
-        for line in response.split('\n')[:10]:
-            if line.strip():
-                print(f"    {line}")
-
-        # Just check we got some response
-        if len(response) > 50:
-            print(f"  ✓ PASS: Memory map retrieved")
-            self.pass_count += 1
-            return True
-        else:
-            print(f"  ✗ FAIL: Memory map too short")
-            self.fail_count += 1
-            return False
-
-    def cleanup(self):
-        """Clean up resources."""
-        print("\nCleaning up...")
+    def stop(self):
+        print("\nCleaning up ...")
         if self.sock:
             try:
-                self.send_command('q')
-            except:
+                self.sock.close()
+            except OSError:
                 pass
-            self.sock.close()
-        if self.emulator_proc:
-            self.emulator_proc.terminate()
+        if self.emulator:
             try:
-                self.emulator_proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.emulator_proc.kill()
+                os.killpg(os.getpgid(self.emulator.pid), signal.SIGTERM)
+                self.emulator.wait(timeout=5)
+            except (subprocess.TimeoutExpired, ProcessLookupError, OSError):
+                try:
+                    os.killpg(os.getpgid(self.emulator.pid), signal.SIGKILL)
+                except OSError:
+                    pass
 
-    def run_tests(self):
-        """Run all memory configuration tests."""
-        print("=" * 60)
+    # --- reading memory --------------------------------------------------
+
+    def read_longs(self, addr, count):
+        """Read `count` longwords using the debugger's 'm.l' (4 per dump)."""
+        longs = []
+        raw = []
+        while len(longs) < count:
+            reply = self.command("m.l %x" % (addr + len(longs) * 4))
+            raw.append(reply)
+            m = re.search(r'\$[0-9A-Fa-f]{8}:((?:\s+[0-9A-Fa-f]{8}){4})', reply)
+            if not m:
+                return None, ''.join(raw)
+            longs += [int(v, 16) for v in m.group(1).split()]
+        return longs[:count], ''.join(raw)
+
+    # --- the checks ------------------------------------------------------
+
+    def check_boot_log(self):
+        print("\nBoot output")
+        if "Memory Map:" in self.boot_log:
+            self.ok("ROM printed its memory map")
+        else:
+            self.bad("ROM printed its memory map",
+                     "captured %d bytes, no 'Memory Map:' header:\n%s"
+                     % (len(self.boot_log), self.boot_log[-400:]))
+        for name in ("Reserved", "Chip", "ROM"):
+            if name in self.boot_log:
+                self.ok("memory map mentions %s" % name)
+            else:
+                self.bad("memory map mentions %s" % name)
+
+    def check_table(self, expected):
+        print("\nMemory map table at $%06X" % MEMMAP_TABLE)
+        longs, raw = self.read_longs(MEMMAP_TABLE, len(expected) * ENTRY_LONGS)
+        if longs is None:
+            self.bad("read the table",
+                     "could not parse a dump out of:\n%s" % raw[-400:])
+            return None
+
+        for i, (base, size, mtype, flags, name) in enumerate(expected):
+            got_base = longs[i * 3]
+            got_size = longs[i * 3 + 1]
+            packed = longs[i * 3 + 2]
+            got_type, got_flags = packed >> 16, packed & 0xFFFF
+
+            if (got_base, got_size, got_type, got_flags) == (base, size, mtype, flags):
+                self.ok("entry %d %-18s $%08X +$%08X %s"
+                        % (i, name, base, size, TYPE_NAME.get(mtype, "?")))
+            else:
+                self.bad("entry %d %s" % (i, name),
+                         "expected base $%08X size $%08X type %d flags $%04X\n"
+                         "got      base $%08X size $%08X type %d flags $%04X"
+                         % (base, size, mtype, flags,
+                            got_base, got_size, got_type, got_flags))
+        return longs
+
+    def check_fast_ram_access(self, expected):
+        fast = [e for e in expected if e[2] == MEM_TYPE_FAST]
+        if not fast:
+            print("\nFast RAM access: no fast RAM configured, skipping")
+            return
+        base, size = fast[0][0], fast[0][1]
+        print("\nFast RAM read/write")
+        # Somewhere near the bottom and somewhere near the top of what the
+        # ROM says is usable - derived, so this cannot outlive the config.
+        for addr, value in ((base + 0x1000, 0xDEADBEEF),
+                            (base + size - 0x1000, 0xCAFEBABE)):
+            self.command("m %x %08X" % (addr, value))
+            reply = self.command("m.l %x" % addr)
+            m = re.search(r'\$[0-9A-Fa-f]{8}:\s+([0-9A-Fa-f]{8})', reply)
+            if m and int(m.group(1), 16) == value:
+                self.ok("wrote and read back $%08X at $%06X" % (value, addr))
+            else:
+                self.bad("wrote and read back $%08X at $%06X" % (value, addr),
+                         "reply was: %s" % reply.strip())
+
+    # --- driver ----------------------------------------------------------
+
+    def run(self):
+        chip, fast = parse_config(self.config)
+        if not chip:
+            print("Could not read chip_memory from %s" % self.config)
+            return 2
+
+        print("=" * 68)
         print("MEMORY CONFIGURATION TEST")
-        print("=" * 60)
+        print("=" * 68)
+        print("config     %s" % self.config)
+        print("chip RAM   %d KB" % (chip // 1024))
+        print("fast RAM   %d KB" % (fast // 1024))
+
+        expected = expected_entries(chip, fast)
 
         try:
-            self.start_emulator()
-            if not self.connect_debugger():
-                print("Failed to connect to debugger")
-                return False
+            self.start()
+            if not self.connect():
+                print("\nCould not reach the debugger. The ROM only drops into it "
+                      "when\nboot fails - if a bootable SYSTEM.BIN is present it "
+                      "runs the kernel\ninstead and never reaches the prompt.")
+                return 2
 
-            print("\n" + "=" * 60)
-            print("TESTING MEMORY VARIABLES")
-            print("=" * 60)
+            self.check_boot_log()
+            self.check_table(expected)
+            self.check_fast_ram_access(expected)
 
-            # Test chip RAM (should be 1MB = $100000)
-            self.test_memory_var("CHIP_RAM_VAR", 0x460, 0x100000)
-
-            # Test slow RAM (should be 0)
-            self.test_memory_var("SLOW_RAM_VAR", 0x464, 0x000000)
-
-            # Test fast RAM size (should be 8MB = $800000)
-            self.test_memory_var("FAST_RAM_VAR", 0x468, 0x800000)
-
-            # Test fast RAM base (should be $200000 after autoconfig)
-            self.test_memory_var("FAST_RAM_BASE", 0x46C, 0x200000)
-
-            print("\n" + "=" * 60)
-            print("TESTING FAST RAM ACCESS")
-            print("=" * 60)
-
-            # Test writing to fast RAM base
-            self.test_memory_write(0x200000, 0xDEADBEEF)
-
-            # Test writing to fast RAM at +1MB
-            self.test_memory_write(0x300000, 0xCAFEBABE)
-
-            # Test writing to fast RAM at +7MB (near end)
-            self.test_memory_write(0x900000, 0x12345678)
-
-            print("\n" + "=" * 60)
-            print("TESTING MEMORY MAP")
-            print("=" * 60)
-
-            self.test_memory_map()
-
-            print("\n" + "=" * 60)
-            print("TEST SUMMARY")
-            print("=" * 60)
-            print(f"Total tests:  {self.test_count}")
-            print(f"Passed:       {self.pass_count}")
-            print(f"Failed:       {self.fail_count}")
-
-            if self.fail_count == 0:
-                print("\n✓ ALL TESTS PASSED")
-                return True
-            else:
-                print(f"\n✗ {self.fail_count} TEST(S) FAILED")
-                return False
-
+            print("\n" + "=" * 68)
+            print("%d passed, %d failed" % (self.passed, self.failed))
+            return 0 if self.failed == 0 else 1
         finally:
-            self.cleanup()
+            self.stop()
 
-def main():
-    tester = DebuggerTest()
-    success = tester.run_tests()
-    return 0 if success else 1
+
+def main(argv):
+    config = argv[1] if len(argv) > 1 else config_from_makefile()
+    if not os.path.exists(config):
+        print("No such config: %s" % config)
+        return 2
+    return MemoryTest(config).run()
+
 
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(main(sys.argv))

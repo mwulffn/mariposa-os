@@ -1,5 +1,26 @@
 # Interrupt Control Design
 
+> **Status.** Not implemented. `cpu.s` does not exist, and none of the four
+> functions or the two macros below have been written.
+>
+> More importantly, **nothing in the system enables interrupts at all**, so
+> there is currently nothing for these to control. They are gated twice and
+> both gates are shut:
+>
+> - `bootstrap.s` writes `$7FFF` to INTENA at reset, clearing every enable
+>   including the master INTEN bit, and never writes INTENA again.
+> - `bootstrap.s` sets SR to `$2700` immediately before jumping to the
+>   kernel, masking CPU levels 1-7, and the kernel never lowers it.
+>
+> Note that INTREQ bits are set by the hardware regardless of INTENA, so
+> polled waits such as the `WaitVBL()` macro in `amiga_hw.h` work fine with
+> interrupts fully disabled. That can make it look as though interrupts are
+> partly working when none has ever fired.
+>
+> First thing to build once they are enabled: an ISR that increments a
+> counter, so "did it fire, and how often" has an unambiguous answer. On PAL
+> the vertical blank should give 50 per second.
+
 ## Overview
 
 Interrupt enable/disable must be atomic and safe to use from any context. On the 68000, modifying SR is a single instruction and inherently atomic.

@@ -19,14 +19,17 @@ That's it! The script handles everything: starting the emulator, connecting to s
 | `m[.b] <addr>` | Memory dump as bytes (16 bytes) | `m 400` |
 | `m.w <addr>` | Memory dump as words (8 words) | `m.w FC0000` |
 | `m.l <addr>` | Memory dump as longs (4 longs) | `m.l 4` |
-| `m <addr> <hex>` | Write memory (auto-sizes: 1-2=byte, 3-4=word, 5-8=long) | `m 1000 DEADBEEF` |
+| `m <addr> <hex>` | **Write** memory, auto-sized: 1-2 digits=byte, 3-4=word, 5-8=long | `m 1000 DEADBEEF` |
 | `m[.b/.w/.l]` | Continue dump from last address | `m.w` |
 | `g` | Continue execution from saved PC | `g` |
 | `g <addr>` | Continue from specified address | `g FC1000` |
 | `?` | Display help | `?` |
 
 **Notes:**
-- Register names are case-insensitive (D0, d0, A5, a5)
+- A second argument to `m` is a value to **store**, not a dump length. The
+  dump length is fixed at 16 bytes.
+- Register names: the first letter is case-insensitive, the second is not, so
+  `r pc` fails and `r pC` works. Same for `SR`. Use uppercase.
 - Hex values can use `$` prefix or not ($DEAD, DEAD)
 - Memory dump modes: `.b` (bytes), `.w` (words), `.l` (longs) - all dump 16 bytes total
 - Type `quit`, `exit`, or press Ctrl-D to exit
@@ -152,12 +155,14 @@ make           # Build ROM first
 ## Technical Details
 
 **Architecture:**
-- Boot → DebuggerEntry → DebuggerMain (command loop)
-- Exception handlers → Panic → DebuggerMain
-- Continue command uses RTE to restore full CPU state
+- Boot → `debugger_entry` → `debugger_main` (command loop)
+- Exception handlers → `panic_with_msg` / `panic_with_msg_group0` → `panic`
+  → `debugger_main`
+- Continue command uses RTE to restore CPU state
 
 **Memory Layout:**
-- $000400: Saved registers (D0-D7, A0-A7, PC, SR)
+- $000400: Saved registers (D0-D7, A0-A7, PC, SR), then the panic message
+  pointer at $448 and the exception frame offset at $44C
 - $000850: Command buffer (128 bytes)
 - $0008D0: Buffer index
 - $0008D4: Last memory address
@@ -166,6 +171,8 @@ make           # Build ROM first
 - Baud rate: 9600 (SERPER = $0170)
 - RBF (Receive Buffer Full): SERDATR bit 14
 - TBE (Transmit Buffer Empty): SERDATR bit 13
+- Transmit actually polls TSRE (bit 12), not TBE - it waits for the shift
+  register to drain rather than the buffer, which is slower but correct
 - Polling-based (no interrupts)
 
 **Implementation:**
@@ -189,9 +196,29 @@ All tests should pass with no errors.
 - No bus error protection on memory access
 - No breakpoints or single-step
 - No command history (except backspace)
+- No symbol support; addresses only
+
+## Known Issues
+
+- **`g` does not restore A7.** It builds the RTE frame on the debugger's own
+  stack and never reloads the saved stack pointer, so resumed code runs on
+  the wrong stack with the command loop's return address still on it. A
+  dedicated debugger stack is in the design (`DBG_STACK` in `hardware.i`) but
+  is never loaded - and sits at an odd address, which would address-error if
+  it were.
+- **`m <addr> <hex>` does not check alignment.** A long write to an odd
+  address takes an address error.
+- **Register names are only half case-folded**, as noted above.
+
+## Planned
+
+From `docs/rom_design.md`, not built yet: breakpoints, single stepping,
+disassembly, keyboard input via CIA-A, and a console using the built-in 8x8
+font.
 
 ## Files
 
 - `debug.py` - Interactive launcher (recommended)
 - `src/rom/debugger.s` - Debugger implementation
-- `docs/debugger.md` - This file
+- `src/rom/panic.s` - Register capture and the exception entry points
+- `docs/rom/debugger.md` - This file

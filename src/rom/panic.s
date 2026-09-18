@@ -1,13 +1,16 @@
 ; ============================================================
 ; panic.s - Serial-only panic handler for ROM
 ; ============================================================
-; Provides panic() function that:
+; Provides a panic path that:
 ;   1. Saves all registers
 ;   2. Outputs CPU state to serial port
 ;   3. Enters interactive debugger
 ;
-; Call with:  JSR panic
-; Or install as exception handler via panic_with_msg
+; Entry is from an exception handler only - panic decodes SR and PC out
+; of the exception stack frame, so there is no plain JSR entry point.
+; Pick the entry point that matches the frame the CPU pushed:
+;   panic_with_msg         - group 1/2 faults (6-byte frame)
+;   panic_with_msg_group0  - bus / address error (14-byte frame)
 ; ============================================================
 
 ; hardware.i already included by bootstrap.s
@@ -37,11 +40,13 @@ saved_a7        equ REG_DUMP_AREA+$3C
 saved_sr        equ REG_DUMP_AREA+$40
 saved_pc        equ REG_DUMP_AREA+$44
 panic_msg_ptr   equ REG_DUMP_AREA+$48
+panic_frame_off equ REG_DUMP_AREA+$4C    ; word: SR offset in exception frame
 
 ; ============================================================
-; panic - Main entry point
+; panic - Common panic body
 ; ============================================================
-; Call this to dump state and enter debugger.
+; Entered only via panic_with_msg / panic_with_msg_group0, which set
+; panic_frame_off to the byte offset of SR within the exception frame.
 ; All registers are preserved for display.
 ; ============================================================
 panic:
@@ -51,11 +56,18 @@ panic:
     ; Save A7 (stack pointer) - it's not in movem range
     move.l  sp,saved_a7
 
-    ; Save SR
-    move.w (sp),saved_sr
+    ; Walk to the SR/PC pair inside the exception frame. Group 0 faults
+    ; push SSW, access address and IR ahead of it; everything else puts
+    ; SR/PC at the top of the frame.
+    moveq   #0,d0
+    move.w  panic_frame_off,d0
+    lea     0(sp,d0.l),a0
 
-    ; Save return address as PC (caller's location)
-    move.l  2(sp),saved_pc
+    ; Save SR
+    move.w  (a0),saved_sr
+
+    ; Save faulting PC
+    move.l  2(a0),saved_pc
 
     ; Output to serial port
     bsr     panic_serial_output
@@ -64,14 +76,29 @@ panic:
     jmp     debugger_main
 
 ; ============================================================
-; panic_with_msg - Entry point preserving a message
+; panic_with_msg - Exception entry, 6-byte frame
 ; ============================================================
 ; A0 = pointer to message string (null terminated)
-; Saves message pointer, then calls panic
+; Stack: 0(sp).w = SR, 2(sp).l = PC
+; Use for group 1/2 faults: illegal, zero divide, CHK, TRAPV, privilege
+; violation, trace, line A/F, TRAP, interrupts.
 ; ============================================================
 panic_with_msg:
     move.l  a0,panic_msg_ptr
-    move.l  a0,a5
+    move.w  #0,panic_frame_off
+    bra.s   panic
+
+; ============================================================
+; panic_with_msg_group0 - Exception entry, 14-byte frame
+; ============================================================
+; A0 = pointer to message string (null terminated)
+; Stack: 0(sp).w = SSW, 2(sp).l = access address, 6(sp).w = IR,
+;        8(sp).w = SR, 10(sp).l = PC
+; Use for bus error and address error only.
+; ============================================================
+panic_with_msg_group0:
+    move.l  a0,panic_msg_ptr
+    move.w  #8,panic_frame_off
     bra.s   panic
 
 ; ============================================================

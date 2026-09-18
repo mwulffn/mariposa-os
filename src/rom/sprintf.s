@@ -14,17 +14,24 @@
 ;   SP+12: Second argument, etc.
 ;
 ; Format specifiers:
-;   %x.b - Hex byte (2 digits)
-;   %x.w - Hex word (4 digits)
-;   %x.l - Hex long (8 digits, default)
-;   %d   - Unsigned decimal
-;   %b.b - Binary byte
-;   %b.w - Binary word
+;   %x   - Hex, long by default (8 digits)
+;   %d   - Unsigned decimal, full 32-bit range
+;   %b   - Binary, long by default (32 digits)
 ;   %s   - String
 ;   %%   - Literal '%'
 ;
-; Width specifier (optional):
-;   %08x - Pad with zeros to 8 digits
+; Size modifier (optional), accepted on either side of the specifier, so
+; %x.b and %.bx mean the same thing:
+;   .b - byte (2 hex digits / 8 binary digits)
+;   .w - word (4 / 16)
+;   .l - long (8 / 32)
+; A '.' not followed by b, w or l is literal text, so "%d.%d" still works.
+;
+; Width specifier (optional), one or more digits before the specifier,
+; clamped to 8. Applies to hex only:
+;   %08x, %8x - 8 digits, zero filled
+;
+; Arguments are always longword stack slots regardless of size modifier.
 ;
 ; Returns:
 ;   A0 = SPRINTF_BUFFER pointer
@@ -52,21 +59,47 @@ Sprintf:
 
     ; Parse format specifier
     moveq   #0,d1               ; Width (0 = no padding)
-    moveq   #'l',d2             ; Size (.b/.w/.l)
+    moveq   #'l',d2             ; Size (.b/.w/.l), long by default
 
-    ; Check for width specifier
+    ; Optional width: one or more digits, so "%08x" works and not just "%8x".
+    ; A leading zero is decoration - FormatHexToBuffer always emits exactly
+    ; the digit count it is given, zero filled.
+.width_loop:
     move.b  (a2),d0
     cmp.b   #'0',d0
-    blt.s   .no_width
+    blt.s   .width_done
     cmp.b   #'9',d0
-    bgt.s   .no_width
-
-    ; Parse width
-    sub.b   #'0',d0
-    move.b  d0,d1
+    bgt.s   .width_done
+    mulu    #10,d1
+    and.w   #$0F,d0
+    add.w   d0,d1
     addq.l  #1,a2
+    bra.s   .width_loop
 
-.no_width:
+.width_done:
+    ; A 32-bit value is 8 hex digits at most, and a wider count would
+    ; overflow the byte-sized shift in FormatHexToBuffer.
+    cmp.w   #8,d1
+    bls.s   .size_before
+    moveq   #8,d1
+
+.size_before:
+    ; Size modifier ahead of the specifier: "%.lx". Only consume the '.'
+    ; when a size letter really follows it.
+    cmp.b   #'.',(a2)
+    bne.s   .get_spec
+    move.b  1(a2),d3
+    cmp.b   #'b',d3
+    beq.s   .take_before
+    cmp.b   #'w',d3
+    beq.s   .take_before
+    cmp.b   #'l',d3
+    bne.s   .get_spec
+.take_before:
+    move.b  d3,d2
+    addq.l  #2,a2
+
+.get_spec:
     ; Get specifier
     move.b  (a2)+,d0
 
@@ -74,11 +107,30 @@ Sprintf:
     cmp.b   #'%',d0
     beq     .literal
 
-    ; Check for size modifier
-    cmp.b   #'.',d0
+    ; Size modifier after the specifier: "%x.l". This is the form almost
+    ; every caller in this ROM writes, so it has to be accepted too.
+    ;
+    ; Only for specifiers where a size means something. Without that gate
+    ; "%s.bin" would swallow the ".b" and print "in", and "%d.log" would
+    ; lose its ".l" - a trap for whoever writes the next format string.
+    cmp.b   #'x',d0
+    beq.s   .want_suffix
+    cmp.b   #'b',d0
     bne.s   .check_spec
-    move.b  (a2)+,d2            ; Get size (.b/.w/.l)
-    move.b  (a2)+,d0            ; Get actual specifier
+.want_suffix:
+    ; And only when a size letter really follows, so "%x.txt" keeps its dot.
+    cmp.b   #'.',(a2)
+    bne.s   .check_spec
+    move.b  1(a2),d3
+    cmp.b   #'b',d3
+    beq.s   .take_after
+    cmp.b   #'w',d3
+    beq.s   .take_after
+    cmp.b   #'l',d3
+    bne.s   .check_spec
+.take_after:
+    move.b  d3,d2
+    addq.l  #2,a2
 
 .check_spec:
     cmp.b   #'x',d0
@@ -92,7 +144,9 @@ Sprintf:
     bra     .loop               ; Unknown specifier, skip
 
 .hex:
-    ; Get argument based on size
+    ; Get argument based on size. Callers always push longword slots,
+    ; whatever width they asked to display, so every path reads a long and
+    ; then narrows - reading a word here took the high half of the slot.
     cmp.b   #'b',d2
     beq.s   .hex_byte
     cmp.b   #'w',d2
@@ -104,14 +158,14 @@ Sprintf:
     bra.s   .do_hex
 
 .hex_word:
-    moveq   #0,d3
-    move.w  (a3)+,d3            ; Get word argument
+    move.l  (a3)+,d3
+    and.l   #$FFFF,d3           ; Narrow to a word
     moveq   #4,d4               ; 4 digits
     bra.s   .do_hex
 
 .hex_byte:
-    moveq   #0,d3
-    move.w  (a3)+,d3            ; Get byte as word
+    move.l  (a3)+,d3
+    and.l   #$FF,d3             ; Narrow to a byte
     moveq   #2,d4               ; 2 digits
 
 .do_hex:
@@ -130,20 +184,27 @@ Sprintf:
     bra     .loop
 
 .bin:
-    ; Get argument based on size
+    ; Get argument based on size - longword slots again, as above.
+    cmp.b   #'b',d2
+    beq.s   .bin_byte
     cmp.b   #'w',d2
     beq.s   .bin_word
 
-.bin_byte:
-    moveq   #0,d3
-    move.w  (a3)+,d3
-    moveq   #8,d4               ; 8 bits
+.bin_long:
+    move.l  (a3)+,d3
+    moveq   #32,d4              ; 32 bits
     bra.s   .do_bin
 
 .bin_word:
-    moveq   #0,d3
-    move.w  (a3)+,d3
+    move.l  (a3)+,d3
+    and.l   #$FFFF,d3
     moveq   #16,d4              ; 16 bits
+    bra.s   .do_bin
+
+.bin_byte:
+    move.l  (a3)+,d3
+    and.l   #$FF,d3
+    moveq   #8,d4               ; 8 bits
 
 .do_bin:
     bsr     FormatBinToBuffer
@@ -211,11 +272,11 @@ FormatHexToBuffer:
 ; ============================================================
 ; FormatDecToBuffer - Convert value to decimal and append to buffer
 ; ============================================================
-; D3.l = value
+; D3.l = value (unsigned, full 32-bit range)
 ; A1 = buffer pointer (updated)
-; Modifies: D3-D6, A4
+; Modifies: A1 only. A6 is used as scratch by the reversal below.
 FormatDecToBuffer:
-    movem.l d3-d6/a4,-(sp)
+    movem.l d0-d6/a4,-(sp)
 
     ; Handle zero
     tst.l   d3
@@ -228,14 +289,15 @@ FormatDecToBuffer:
     move.l  a1,a4               ; Save start
 
 .digit_loop:
-    move.l  d3,d4
-    divu    #10,d4
-    swap    d4                  ; Remainder in low word
-    add.b   #'0',d4
-    move.b  d4,(a1)+
-    clr.w   d4
-    swap    d4
-    move.l  d4,d3
+    ; divu32_10 rather than divu.w #10: divu.w is 32/16 -> 16, so it
+    ; overflows as soon as the quotient passes 65535 - that is, for any
+    ; value from 655360 up, which partition LBAs and block counts reach
+    ; easily. On overflow the 68000 leaves the destination untouched.
+    move.l  d3,d0
+    bsr     divu32_10           ; D0 = quotient, D1 = remainder
+    add.b   #'0',d1
+    move.b  d1,(a1)+
+    move.l  d0,d3
     tst.l   d3
     bne.s   .digit_loop
 
@@ -262,7 +324,7 @@ FormatDecToBuffer:
     bra.s   .reverse
 
 .done:
-    movem.l (sp)+,d3-d6/a4
+    movem.l (sp)+,d0-d6/a4
     rts
 
 ; ============================================================
