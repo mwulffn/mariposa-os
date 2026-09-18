@@ -84,6 +84,20 @@ debug.py                      - Interactive debugger launcher
 test_*.py                     - Test scripts
 ```
 
+## Testing
+
+```bash
+make test                     # headless ROM tests, ~40ms, no emulator needed
+make test FILTER=rom.panic    # narrow to one group while iterating
+```
+
+Runs the real `kick.rom` under a 68000 CPU simulator. Results use the `###`
+line protocol and the exit code is the verdict (0 pass, 1 test failed,
+2 harness error). Prefer this tier for anything that is pure logic; use
+FS-UAE only for behaviour that needs real hardware.
+
+**Full guide:** See `docs/testing.md`
+
 ## Documentation
 
 Decisions about architecture and design can be found int the 'docs' directory. Read them carefully when implementing new features.

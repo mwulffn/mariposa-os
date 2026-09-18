@@ -25,7 +25,7 @@ else
     FS_UAE ?= fs-uae
 endif
 
-.PHONY: all rom kernel deploy run run-open clean
+.PHONY: all rom kernel deploy run run-open clean test test-clean
 .PHONY: docker-image docker-image-refresh docker-build docker-make docker-shell docker-versions
 
 all: rom kernel
@@ -49,9 +49,28 @@ run: rom deploy
 run-open: rom deploy
 	open -a "FS-UAE" --args "$(PWD)/$(CONFIG)"
 
+# ---------------------------------------------------------------------------
+# Headless tests
+# ---------------------------------------------------------------------------
+# Runs real ROM code under a 68000 CPU simulator: no emulator, no display, no
+# serial port, whole suite in well under a second. Output is the ### protocol
+# (see docs/testing.md); the exit code is the verdict.
+#
+#   make test                       run everything
+#   make test FILTER=rom.panic      run one group while iterating
+# ---------------------------------------------------------------------------
+FILTER ?=
+
+test: rom
+	@$(MAKE) -C tests run FILTER="$(FILTER)"
+
+test-clean:
+	$(MAKE) -C tests clean
+
 clean:
 	$(MAKE) -C $(ROM_DIR) clean
 	$(MAKE) -C $(KERNEL_DIR) clean
+	$(MAKE) -C tests clean
 
 # ---------------------------------------------------------------------------
 # Containerised build

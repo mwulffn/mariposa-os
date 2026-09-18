@@ -101,7 +101,16 @@ FROM debian:bookworm-slim AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
         make \
         mtools \
+        python3 \
+        gcc \
+        libc6-dev \
+        git \
+        ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# python3: src/rom/Makefile runs tests/mksym.py to emit the ROM symbol table.
+# gcc + libc6-dev: the headless tests in tests/ are host-native C.
+# git: only needed if Musashi has to be fetched, which the layer below avoids.
 
 COPY --from=toolchain /opt/amiga-toolchain/bin/ /usr/local/bin/
 COPY --from=toolchain /opt/amiga-toolchain/VERSIONS /opt/amiga-toolchain/VERSIONS
@@ -111,6 +120,17 @@ COPY --from=toolchain /opt/amiga-toolchain/VERSIONS /opt/amiga-toolchain/VERSION
 # sectors not a multiple of sectors per track". The container also runs as
 # the caller's uid, which has no home directory here and so no ~/.mtoolsrc.
 ENV MTOOLS_SKIP_CHECK=1
+
+# Pre-fetch and pre-generate Musashi so `make test` works offline and starts
+# immediately. tests/Makefile takes MUSASHI_DIR from the environment, so this
+# copy is used instead of fetching into the mounted tree.
+ARG MUSASHI_REPO=https://github.com/kstenerud/Musashi.git
+RUN git clone --depth 1 "$MUSASHI_REPO" /opt/musashi \
+    && cd /opt/musashi \
+    && gcc -w -o m68kmake m68kmake.c \
+    && ./m68kmake \
+    && rm -rf /opt/musashi/.git
+ENV MUSASHI_DIR=/opt/musashi
 
 WORKDIR /work
 CMD ["make", "all"]
