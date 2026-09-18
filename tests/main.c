@@ -14,6 +14,7 @@
 extern const test_suite format_suite;
 extern const test_suite vector_suite;
 extern const test_suite disk_suite;
+extern const test_suite math_suite;
 
 /* Where mkdisk.py put the generated disk images. */
 void t_set_disk_dir(const char *dir);
@@ -46,7 +47,8 @@ int main(int argc, char **argv)
     t_set_disk_dir(diskdir);
 
     {
-        const test_suite suites[] = { format_suite, vector_suite, disk_suite };
+        const test_suite suites[] = { math_suite, format_suite, vector_suite,
+                                      disk_suite };
         rc = run_suites(suites, sizeof suites / sizeof suites[0], filter);
     }
 

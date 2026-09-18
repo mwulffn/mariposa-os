@@ -211,11 +211,11 @@ FormatHexToBuffer:
 ; ============================================================
 ; FormatDecToBuffer - Convert value to decimal and append to buffer
 ; ============================================================
-; D3.l = value
+; D3.l = value (unsigned, full 32-bit range)
 ; A1 = buffer pointer (updated)
-; Modifies: D3-D6, A4
+; Modifies: A1 only. A6 is used as scratch by the reversal below.
 FormatDecToBuffer:
-    movem.l d3-d6/a4,-(sp)
+    movem.l d0-d6/a4,-(sp)
 
     ; Handle zero
     tst.l   d3
@@ -228,14 +228,15 @@ FormatDecToBuffer:
     move.l  a1,a4               ; Save start
 
 .digit_loop:
-    move.l  d3,d4
-    divu    #10,d4
-    swap    d4                  ; Remainder in low word
-    add.b   #'0',d4
-    move.b  d4,(a1)+
-    clr.w   d4
-    swap    d4
-    move.l  d4,d3
+    ; divu32_10 rather than divu.w #10: divu.w is 32/16 -> 16, so it
+    ; overflows as soon as the quotient passes 65535 - that is, for any
+    ; value from 655360 up, which partition LBAs and block counts reach
+    ; easily. On overflow the 68000 leaves the destination untouched.
+    move.l  d3,d0
+    bsr     divu32_10           ; D0 = quotient, D1 = remainder
+    add.b   #'0',d1
+    move.b  d1,(a1)+
+    move.l  d0,d3
     tst.l   d3
     bne.s   .digit_loop
 
@@ -262,7 +263,7 @@ FormatDecToBuffer:
     bra.s   .reverse
 
 .done:
-    movem.l (sp)+,d3-d6/a4
+    movem.l (sp)+,d0-d6/a4
     rts
 
 ; ============================================================

@@ -151,6 +151,22 @@ static void t_decimal_large(void)
     CHECK_STR("16777216", rom_printf1("%d", 16777216));
 }
 
+static void t_decimal_max_u32(void)
+{
+    /* Ten digits, the widest %d has to render. */
+    CHECK_STR("4294967295", rom_printf1("%d", 0xFFFFFFFFu));
+}
+
+static void t_decimal_lba_sized(void)
+{
+    /* The shape partition.s prints: a start LBA and a block count well past
+     * where the old divu.w gave up. */
+    uint32_t args[2];
+    args[0] = 2560000u;
+    args[1] = 128u;
+    CHECK_STR("LBA 2560000 size 128", rom_printf("LBA %d size %d", args, 2));
+}
+
 /* --- %s ----------------------------------------------------------------- */
 
 static void t_string(void)
@@ -338,10 +354,10 @@ static const test_case tests[] = {
     { "decimal_small",           t_decimal_small,           NULL },
     { "decimal_five_digits",     t_decimal_five_digits,     NULL },
     { "decimal_at_divu_limit",   t_decimal_at_divu_limit,   NULL },
-    { "decimal_past_divu_limit", t_decimal_past_divu_limit,
-      "FormatDecToBuffer uses divu.w: the quotient overflows 16 bits at 655360" },
-    { "decimal_large",           t_decimal_large,
-      "FormatDecToBuffer uses divu.w: the quotient overflows 16 bits at 655360" },
+    { "decimal_past_divu_limit", t_decimal_past_divu_limit, NULL },
+    { "decimal_large",           t_decimal_large,           NULL },
+    { "decimal_max_u32",         t_decimal_max_u32,         NULL },
+    { "decimal_lba_sized",       t_decimal_lba_sized,       NULL },
 
     { "string",                  t_string,                  NULL },
     { "string_empty",            t_string_empty,            NULL },

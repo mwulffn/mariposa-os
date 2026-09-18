@@ -20,7 +20,8 @@ CFLAGS_TEST    = -std=c99 -O1 -g -Wall -Wextra -I. -I$(BUILD) -I$(MUSASHI_DIR)
 CFLAGS_MUSASHI = -O2 -g -w -I$(MUSASHI_DIR)
 LDLIBS         = -lm
 
-TEST_SRC = main.c protocol.c harness.c test_format.c test_vectors.c test_disk.c
+TEST_SRC = main.c protocol.c harness.c test_math.c test_format.c \
+           test_vectors.c test_disk.c
 TEST_OBJ = $(TEST_SRC:%.c=$(BUILD)/%.o)
 
 MUSASHI_OBJ = $(BUILD)/m68kcpu.o $(BUILD)/m68kdasm.o $(BUILD)/m68kops.o \

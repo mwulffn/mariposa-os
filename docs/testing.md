@@ -158,25 +158,36 @@ catch.
 
 The storage path is in better shape than the formatting code: `ide.s`,
 `find_rdb`, the FAT16 boot-sector parse, the directory scan, the chain walk
-and `load_system_bin` all pass against a real generated image, including
-loading all 5000 bytes of a ten-cluster scattered file to `$200000` in the
-right order.
+and `load_system_bin` all passed against a real generated image first try,
+including loading all 5000 bytes of a ten-cluster scattered file to `$200000`
+in the right order.
 
-The one disk failure is the LBA overflow. `load_partition` computes
-`LowCyl * Heads * Sectors` with `mulu.w`, so the `LowCyl * Heads`
-intermediate truncates to 16 bits. With the test image's 20000 cylinders and
-4 heads, 80000 becomes 14464 and the start LBA comes out as `$71000` instead
-of `$271000`. In practice that means any partition starting more than roughly
-2GB into a disk is read from the wrong place.
+Two bugs it pinned have since been fixed, and the tests that found them now
+guard the fixes:
 
-Building the first tier turned up a bug that reading the code had missed:
-`serial_put_decimal` is wrong for every multi-digit value. Its reversal loop
-decrements the tail pointer before storing the saved byte, so it writes to the
-wrong index, and it then prints from the advanced head pointer rather than the
-buffer start — `4095` comes out as `54`. It is currently uncalled, so the bug
-is latent.
+- **Partition LBA overflow.** `load_partition` computed
+  `LowCyl * Heads * Sectors` with chained `mulu.w`, which is 16x16, so the
+  `LowCyl * Heads` intermediate truncated. At 20000 cylinders and 4 heads,
+  80000 became 14464 and the start LBA came out `$71000` instead of
+  `$271000` — any partition more than roughly 2GB into a disk read from the
+  wrong place.
+- **`%d` above 655359.** `FormatDecToBuffer` used `divu.w #10`, which is
+  32/16 → 16 and overflows once the quotient passes 65535. On overflow the
+  68000 leaves the destination untouched, so the digits were garbage.
+  `partition.s` prints LBAs and block counts with `%d`, so this was live.
 
-The other xfails are in `sprintf.s`, and the sharpest one is that the
+Both now go through `src/rom/math.s`: `mul32x16` for the multiply and
+`divu32_10` for the divide, each tested at its boundaries and swept against
+host arithmetic over a few thousand values.
+
+Building the first tier also turned up a bug that reading the code had
+missed, still open: `serial_put_decimal` is wrong for every multi-digit
+value. Its reversal loop decrements the tail pointer before storing the saved
+byte, so it writes to the wrong index, and it then prints from the advanced
+head pointer rather than the buffer start — `4095` comes out as `54`. It also
+still uses `divu.w #10`. It is uncalled, so the bugs are latent.
+
+The remaining xfails are in `sprintf.s`, and the sharpest is that the
 documented format syntax is not the implemented one. The parser wants the size
 modifier *before* the specifier (`%.lx`), but almost every caller writes it
 after (`%x.l`, `%x.b`). Those print a full longword followed by the modifier as

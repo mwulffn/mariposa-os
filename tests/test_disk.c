@@ -196,9 +196,9 @@ static void t_part_load(void)
 
 static void t_part_lowcyl_overflow(void)
 {
-    /* start LBA = LowCyl * Heads * Sectors, computed with mulu.w. The
-     * LowCyl * Heads intermediate is truncated to 16 bits, so any partition
-     * starting past roughly 16k cylinders lands at the wrong LBA. */
+    /* start LBA = LowCyl * Heads * Sectors. With LowCyl * Heads above 65535
+     * the old chained mulu.w truncated the intermediate and put the
+     * partition roughly 2GB from where it belongs. */
     h_result r;
     if (attach(DISK_BIGCYL_IMAGE)) return;
     load_rdb();
@@ -463,10 +463,7 @@ static const test_case tests[] = {
     { "rdb_find",              t_rdb_find,              NULL },
     { "rdb_not_found",         t_rdb_not_found,         NULL },
     { "part_load",             t_part_load,             NULL },
-    { "part_lowcyl_overflow",  t_part_lowcyl_overflow,
-      "load_partition computes LowCyl*Heads*Sectors with mulu.w: the "
-      "intermediate truncates to 16 bits, so a partition starting past "
-      "roughly 2GB gets the wrong LBA" },
+    { "part_lowcyl_high",      t_part_lowcyl_overflow,  NULL },
 
     { "fat_init",              t_fat_init,              NULL },
     { "fat_init_bad_signature",t_fat_init_bad_signature,NULL },
