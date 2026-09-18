@@ -7,6 +7,20 @@ Two tiers. The fast one needs no Amiga at all.
 | Headless CPU | ROM routines and the kernel's libsup.s, as real 68000 code, incl. the whole IDE/RDB/FAT16 path | ~0.3s for the whole suite | `make test` |
 | FS-UAE | Boot path, real hardware behaviour | seconds, needs a display | `./debug.py`, `test_*.py` |
 
+The FS-UAE tier is three scripts:
+
+| Script | Checks |
+|--------|--------|
+| `test_memory_config.py` | The memory map table, entry by entry, against the sizes in whichever config `make run` launches |
+| `test_comprehensive.py` | The debugger's command set over serial |
+| `test_serial.sh` | That serial output arrives at all |
+
+`test_memory_config.py` derives what it expects from the config file rather
+than hardcoding it. The previous version hardcoded four addresses the ROM had
+stopped using, and had been silently wrong for a long time - which is the
+failure mode to design against in this tier, since nothing runs it
+automatically.
+
 Everything that is pure logic belongs in the first tier. Reserve the emulator
 for things only real hardware can answer.
 

@@ -4,3 +4,5 @@ build/*
 **/build/
 harddrives/*
 tools/*
+__pycache__/
+*.pyc

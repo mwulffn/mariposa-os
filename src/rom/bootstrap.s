@@ -346,10 +346,6 @@ banner_msg:
     dc.b    "AMAG ROM v0.1",10,13,0
     even
 
-newline_msg:
-    dc.b    10,13,0
-    even
-
 success_msg:
     dc.b    "Boot success - GREEN SCREEN",10,13,0
     even

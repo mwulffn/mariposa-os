@@ -200,5 +200,7 @@ from disk. Both are covered by the `disk.*` tests.
 - `Sprintf` cannot be called directly; only via `SerialPrintf`. See
   `docs/rom/sprintf_api.md`.
 - A fresh clone cannot `make run`: nothing creates `harddrives/boot.hdf`.
-- `src/kernel/kernel.asm` is a stale vbcc intermediate committed by accident;
-  the build now generates it under `build/`.
+- `detect_fast_ram` sizes memory by probing one megabyte past the end, and
+  relies on the failed read-back to stop. That works on a floating Zorro II
+  bus but means the routine cannot run under the headless harness, which
+  treats an unmapped access as a fault.
