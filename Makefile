@@ -25,7 +25,7 @@ else
     FS_UAE ?= fs-uae
 endif
 
-.PHONY: all rom kernel deploy run run-open clean test test-clean
+.PHONY: all rom kernel deploy run run-open clean test test-clean lint fmt
 .PHONY: docker-image docker-image-refresh docker-build docker-make docker-shell docker-versions
 
 all: rom kernel
@@ -61,8 +61,32 @@ run-open: rom deploy
 # ---------------------------------------------------------------------------
 FILTER ?=
 
-test: rom
+test: rom lint
 	@$(MAKE) -C tests run FILTER="$(FILTER)"
+
+# ---------------------------------------------------------------------------
+# Python helper scripts
+# ---------------------------------------------------------------------------
+# The repo's Python is six build/debug helpers with no third-party imports.
+# uv exists only to pin ruff; it is deliberately NOT on the build path, so
+# tests/mksym.py and tests/mkdisk.py stay callable as bare `python3` and the
+# ROM still builds in a container that carries python3 and nothing else.
+#
+# `make test` depends on lint, but a missing uv skips rather than fails -
+# otherwise `make docker-make DOCKER_TARGET=test` would break, since
+# docker/Dockerfile has no uv.
+# ---------------------------------------------------------------------------
+UV ?= uv
+
+lint:
+	@if command -v $(UV) >/dev/null 2>&1; then \
+		$(UV) run --quiet ruff check .; \
+	else \
+		echo "lint: $(UV) not found, skipping Python lint"; \
+	fi
+
+fmt:
+	$(UV) run ruff format .
 
 test-clean:
 	$(MAKE) -C tests clean

@@ -4,16 +4,16 @@ Interactive Amiga Debugger
 Launches FS-UAE and provides interactive serial debugging session.
 """
 
+import os
+import signal
 import socket
 import subprocess
 import sys
-import time
-import threading
-import select
-import os
-import signal
-import tty
 import termios
+import threading
+import time
+import tty
+
 
 class AmigaDebugger:
     def __init__(self):
@@ -27,32 +27,32 @@ class AmigaDebugger:
         """Start FS-UAE in the background"""
         print("Starting FS-UAE emulator...")
         self.fsuae_process = subprocess.Popen(
-            ['make', 'run'],
+            ["make", "run"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            preexec_fn=os.setsid  # Create new process group for clean shutdown
+            preexec_fn=os.setsid,  # Create new process group for clean shutdown
         )
 
         # Wait for emulator to start and serial port to be ready
-        print("Waiting for emulator to initialize...", end='', flush=True)
+        print("Waiting for emulator to initialize...", end="", flush=True)
         for i in range(6):
             time.sleep(0.5)
-            print('.', end='', flush=True)
+            print(".", end="", flush=True)
         print(" OK")
 
     def connect_serial(self):
         """Connect to the serial port"""
-        print("Connecting to serial port (localhost:5555)...", end='', flush=True)
+        print("Connecting to serial port (localhost:5555)...", end="", flush=True)
         max_attempts = 5
         for attempt in range(max_attempts):
             try:
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.sock.connect(('localhost', 5555))
+                self.sock.connect(("localhost", 5555))
                 print(" Connected!")
                 return True
             except ConnectionRefusedError:
                 if attempt < max_attempts - 1:
-                    print('.', end='', flush=True)
+                    print(".", end="", flush=True)
                     time.sleep(1)
                 else:
                     print(" Failed!")
@@ -68,24 +68,34 @@ class AmigaDebugger:
             try:
                 data = self.sock.recv(4096)
                 if data:
-                    text = data.decode('ascii', errors='replace')
+                    text = data.decode("ascii", errors="replace")
                     # Print without newline if it doesn't end with one
-                    print(text, end='', flush=True)
+                    print(text, end="", flush=True)
                     # Signal when we see the prompt after the debugger banner
                     if not self.prompt_ready.is_set():
                         buffer.append(text)
-                        combined = ''.join(buffer[-10:])  # Keep last 10 chunks to limit memory
+                        combined = "".join(
+                            buffer[-10:]
+                        )  # Keep last 10 chunks to limit memory
                         # Look for various prompt patterns
                         # Debug: uncomment to see what we're looking for
                         # if 'Debugger' in text:
                         #     print(f"\n[DEBUG] Received: {repr(combined[-50:])}\n", flush=True)
-                        if ('> \n' in combined or combined.endswith('> ') or
-                            (combined.count('>') > 0 and combined.strip().endswith('>'))):
+                        if (
+                            "> \n" in combined
+                            or combined.endswith("> ")
+                            or (
+                                combined.count(">") > 0
+                                and combined.strip().endswith(">")
+                            )
+                        ):
                             self.prompt_ready.set()
                 else:
                     # Empty data means connection closed (FS-UAE quit)
                     if self.running:
-                        print("\n\n[ERROR] Serial connection closed (FS-UAE may have quit)")
+                        print(
+                            "\n\n[ERROR] Serial connection closed (FS-UAE may have quit)"
+                        )
                         self.running = False
                     break
             except socket.timeout:
@@ -110,7 +120,7 @@ class AmigaDebugger:
     def send_command(self, cmd):
         """Send a command to the debugger"""
         try:
-            self.sock.sendall(cmd.encode() + b'\n')
+            self.sock.sendall(cmd.encode() + b"\n")
         except (BrokenPipeError, ConnectionResetError):
             print("\n\n[ERROR] Serial connection lost (FS-UAE may have quit)")
             self.running = False
@@ -122,7 +132,9 @@ class AmigaDebugger:
         """Run interactive debugging session"""
         # Start reader thread
         self.running = True
-        self.reader_thread = threading.Thread(target=self.read_serial_output, daemon=True)
+        self.reader_thread = threading.Thread(
+            target=self.read_serial_output, daemon=True
+        )
         self.reader_thread.start()
 
         # Wait for Amiga's initial prompt
@@ -143,25 +155,25 @@ class AmigaDebugger:
                         cmd = []
                         while True:
                             ch = self.read_char()
-                            if ch in ('\r', '\n'):
-                                self.sock.sendall(b'\r')  # Send CR to trigger command
+                            if ch in ("\r", "\n"):
+                                self.sock.sendall(b"\r")  # Send CR to trigger command
                                 break
-                            elif ch == '\x04':  # Ctrl-D
+                            elif ch == "\x04":  # Ctrl-D
                                 raise EOFError
-                            elif ch == '\x03':  # Ctrl-C
+                            elif ch == "\x03":  # Ctrl-C
                                 raise KeyboardInterrupt
                             else:
                                 cmd.append(ch)
                                 self.sock.sendall(ch.encode())  # Send char immediately
-                        cmd = ''.join(cmd)
+                        cmd = "".join(cmd)
                     else:
                         cmd = sys.stdin.readline()
                         if not cmd:
                             break
-                        cmd = cmd.rstrip('\n')
+                        cmd = cmd.rstrip("\n")
 
                     # Check for exit commands
-                    if cmd.lower() in ['quit', 'exit', 'q']:
+                    if cmd.lower() in ["quit", "exit", "q"]:
                         print("\nExiting debugger...")
                         break
 
@@ -195,7 +207,7 @@ class AmigaDebugger:
         if self.sock:
             try:
                 self.sock.close()
-            except:
+            except Exception:
                 pass
             self.sock = None
 
@@ -205,10 +217,10 @@ class AmigaDebugger:
                 # Kill entire process group
                 os.killpg(os.getpgid(self.fsuae_process.pid), signal.SIGTERM)
                 self.fsuae_process.wait(timeout=2)
-            except:
+            except Exception:
                 try:
                     os.killpg(os.getpgid(self.fsuae_process.pid), signal.SIGKILL)
-                except:
+                except Exception:
                     pass
             self.fsuae_process = None
 
@@ -234,6 +246,7 @@ class AmigaDebugger:
         except Exception as e:
             print(f"\nError: {e}")
             import traceback
+
             traceback.print_exc()
             return 1
 
@@ -244,13 +257,13 @@ class AmigaDebugger:
 def main():
     """Entry point"""
     # Check if ROM exists
-    if not os.path.exists('src/rom/build/kick.rom'):
+    if not os.path.exists("src/rom/build/kick.rom"):
         print("Error: ROM not found at src/rom/build/kick.rom")
         print("Please run 'make' first to build the ROM.")
         return 1
 
     # Check if make/fs-uae are available
-    if os.system('which make >/dev/null 2>&1') != 0:
+    if os.system("which make >/dev/null 2>&1") != 0:
         print("Error: 'make' command not found")
         return 1
 
@@ -259,5 +272,5 @@ def main():
     return debugger.run()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

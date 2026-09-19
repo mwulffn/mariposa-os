@@ -1,0 +1,32 @@
+# Dev tooling only. This project is C and 68000 assembly; the Python here is
+# six build/debug helper scripts with no third-party dependencies.
+#
+# IMPORTANT: tests/mksym.py and tests/mkdisk.py are on the build critical path
+# (src/rom/Makefile, tests/Makefile) and are invoked as bare `python3`. They
+# must stay stdlib-only so the ROM builds without uv - the build container
+# (docker/Dockerfile) carries python3 and nothing else.
+[project]
+name = "amiga-project-scripts"
+version = "0"
+description = "Lint/format config for the repo's Python helper scripts"
+requires-python = ">=3.9"
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 88
+extend-exclude = ["tools"]
+
+# Pinned explicitly rather than left to ruff's defaults, so a ruff upgrade or
+# a stray config elsewhere on the machine cannot turn `make test` red. This is
+# the "real bugs" set - undefined names, unused imports, bare except, syntax -
+# plus import ordering. Deliberately no stylistic rewrites: these scripts use
+# %-formatting throughout and reformatting 1300 working lines buys nothing.
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.8",
+]

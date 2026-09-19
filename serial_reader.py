@@ -5,7 +5,8 @@ import socket
 import sys
 import time
 
-def read_serial(host='localhost', port=5555, timeout=5):
+
+def read_serial(host="localhost", port=5555, timeout=5):
     """Connect to FS-UAE serial port and read data"""
     try:
         print(f"Connecting to {host}:{port}...", file=sys.stderr)
@@ -15,7 +16,7 @@ def read_serial(host='localhost', port=5555, timeout=5):
         print("Connected!", file=sys.stderr)
 
         sock.settimeout(timeout)
-        data = b''
+        data = b""
         start_time = time.time()
 
         while time.time() - start_time < timeout:
@@ -41,7 +42,8 @@ def read_serial(host='localhost', port=5555, timeout=5):
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
-        return b''
+        return b""
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     read_serial()

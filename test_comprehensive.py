@@ -2,17 +2,18 @@
 """Comprehensive debugger test - all commands"""
 
 import socket
-import time
 import subprocess
 import sys
+import time
+
 
 def send_command(sock, cmd, delay=0.8):
     """Send a command and capture response"""
-    sock.sendall(cmd.encode() + b'\r\n')
+    sock.sendall(cmd.encode() + b"\r\n")
     time.sleep(delay)
 
     sock.settimeout(0.3)
-    response = b''
+    response = b""
     try:
         while True:
             data = sock.recv(4096)
@@ -23,7 +24,8 @@ def send_command(sock, cmd, delay=0.8):
         pass
     sock.settimeout(None)
 
-    return response.decode('ascii', errors='replace')
+    return response.decode("ascii", errors="replace")
+
 
 def main():
     print("=" * 60)
@@ -33,9 +35,9 @@ def main():
 
     # Start FS-UAE
     print("Starting FS-UAE...")
-    fsuae = subprocess.Popen(['make', 'run'],
-                             stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL)
+    fsuae = subprocess.Popen(
+        ["make", "run"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
 
     time.sleep(3)
 
@@ -45,13 +47,13 @@ def main():
     try:
         # Connect
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect(('localhost', 5555))
+        sock.connect(("localhost", 5555))
 
         # Wait for banner
         time.sleep(1)
         sock.settimeout(1)
         try:
-            banner = sock.recv(4096).decode('ascii', errors='replace')
+            banner = sock.recv(4096).decode("ascii", errors="replace")
             print(banner)
         except socket.timeout:
             pass
@@ -63,8 +65,8 @@ def main():
 
         # Test 1: Help command
         print("\n[TEST 1] Help command")
-        output = send_command(sock, '?')
-        if 'Commands:' in output and 'Display all registers' in output:
+        output = send_command(sock, "?")
+        if "Commands:" in output and "Display all registers" in output:
             print("✓ PASS: Help displays correctly")
             tests_passed += 1
         else:
@@ -73,8 +75,8 @@ def main():
 
         # Test 2: Register display
         print("\n[TEST 2] Register display")
-        output = send_command(sock, 'r')
-        if 'D0:' in output and 'A0:' in output and 'PC:' in output and 'SR:' in output:
+        output = send_command(sock, "r")
+        if "D0:" in output and "A0:" in output and "PC:" in output and "SR:" in output:
             print("✓ PASS: All registers displayed")
             tests_passed += 1
         else:
@@ -83,9 +85,9 @@ def main():
 
         # Test 3: Modify data register
         print("\n[TEST 3] Modify D0 register")
-        send_command(sock, 'r D0 CAFEBABE')
-        output = send_command(sock, 'r')
-        if 'CAFEBABE' in output:
+        send_command(sock, "r D0 CAFEBABE")
+        output = send_command(sock, "r")
+        if "CAFEBABE" in output:
             print("✓ PASS: D0 modified to CAFEBABE")
             tests_passed += 1
         else:
@@ -95,9 +97,9 @@ def main():
 
         # Test 4: Modify address register
         print("\n[TEST 4] Modify A5 register")
-        send_command(sock, 'r A5 12345678')
-        output = send_command(sock, 'r')
-        if '12345678' in output:
+        send_command(sock, "r A5 12345678")
+        output = send_command(sock, "r")
+        if "12345678" in output:
             print("✓ PASS: A5 modified to 12345678")
             tests_passed += 1
         else:
@@ -106,9 +108,9 @@ def main():
 
         # Test 5: Modify PC
         print("\n[TEST 5] Modify PC register")
-        send_command(sock, 'r PC FC2000')
-        output = send_command(sock, 'r')
-        if 'FC2000' in output:
+        send_command(sock, "r PC FC2000")
+        output = send_command(sock, "r")
+        if "FC2000" in output:
             print("✓ PASS: PC modified to FC2000")
             tests_passed += 1
         else:
@@ -117,9 +119,9 @@ def main():
 
         # Test 6: Modify SR
         print("\n[TEST 6] Modify SR register")
-        send_command(sock, 'r SR 2700')
-        output = send_command(sock, 'r')
-        if '2700' in output:
+        send_command(sock, "r SR 2700")
+        output = send_command(sock, "r")
+        if "2700" in output:
             print("✓ PASS: SR modified to 2700")
             tests_passed += 1
         else:
@@ -128,8 +130,8 @@ def main():
 
         # Test 7: Memory dump at address 0
         print("\n[TEST 7] Memory dump at address 0 (vector table)")
-        output = send_command(sock, 'm 0')
-        if '$00000000:' in output and 'FC' in output:
+        output = send_command(sock, "m 0")
+        if "$00000000:" in output and "FC" in output:
             print("✓ PASS: Vector table dumped")
             tests_passed += 1
         else:
@@ -138,8 +140,8 @@ def main():
 
         # Test 8: Continue memory dump
         print("\n[TEST 8] Continue memory dump")
-        output = send_command(sock, 'm')
-        if '$00000010:' in output:
+        output = send_command(sock, "m")
+        if "$00000010:" in output:
             print("✓ PASS: Continued from address $10")
             tests_passed += 1
         else:
@@ -148,9 +150,11 @@ def main():
 
         # Test 9: Memory dump at ROM
         print("\n[TEST 9] Memory dump at ROM header")
-        output = send_command(sock, 'm FC0000')
+        output = send_command(sock, "m FC0000")
         # ROM header: offset 8 has "AMAG" = $41 $4D $41 $47
-        if '$00FC0000:' in output and ('41 4D 41 47' in output or '414D4147' in output.replace(' ', '')):
+        if "$00FC0000:" in output and (
+            "41 4D 41 47" in output or "414D4147" in output.replace(" ", "")
+        ):
             print("✓ PASS: ROM header shows AMAG magic")
             tests_passed += 1
         else:
@@ -159,8 +163,8 @@ def main():
 
         # Test 10: Case insensitivity
         print("\n[TEST 10] Case insensitive commands")
-        output = send_command(sock, 'R')
-        if 'D0:' in output:
+        output = send_command(sock, "R")
+        if "D0:" in output:
             print("✓ PASS: Uppercase 'R' works")
             tests_passed += 1
         else:
@@ -169,9 +173,9 @@ def main():
 
         # Test 11: Hex with $ prefix
         print("\n[TEST 11] Hex values with $ prefix")
-        send_command(sock, 'r D7 $ABCD1234')
-        output = send_command(sock, 'r')
-        if 'ABCD1234' in output:
+        send_command(sock, "r D7 $ABCD1234")
+        output = send_command(sock, "r")
+        if "ABCD1234" in output:
             print("✓ PASS: $ prefix parsed correctly")
             tests_passed += 1
         else:
@@ -180,8 +184,8 @@ def main():
 
         # Test 12: Invalid command
         print("\n[TEST 12] Invalid command handling")
-        output = send_command(sock, 'xyz')
-        if 'Unknown' in output or 'type ?' in output:
+        output = send_command(sock, "xyz")
+        if "Unknown" in output or "type ?" in output:
             print("✓ PASS: Invalid command rejected")
             tests_passed += 1
         else:
@@ -210,5 +214,6 @@ def main():
 
     return 0 if tests_failed == 0 else 1
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     sys.exit(main())

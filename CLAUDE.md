@@ -37,7 +37,8 @@ make clean    # Clean all build artifacts
 Requires: vasmm68k_mot (VASM with Motorola syntax), Python 3 (the ROM build
 runs `tests/mksym.py` to emit a symbol table), FS-UAE, vbcc (for kernel),
 mtools (for deployment). `make test` additionally needs a host C compiler and,
-on first run, git to fetch Musashi.
+on first run, git to fetch Musashi; it also runs `make lint`, which uses uv if
+present and is skipped if not.
 
 **ROM assembler flags:** `-Fbin -m68000 -no-opt`
 
@@ -126,6 +127,33 @@ Prefer this tier for anything that is pure logic. Use FS-UAE only for
 behaviour that needs real hardware. Nothing here proves the ROM boots.
 
 **Full guide:** See `docs/testing.md`
+
+### Python helper scripts
+
+`make test` runs `make lint` first, so a lint error fails the suite before a
+single test runs. uv is used only to pin ruff:
+
+```bash
+make lint     # uv run ruff check .   (skipped with a notice if uv is absent)
+make fmt      # uv run ruff format .
+uv sync       # install the dev group after a fresh clone
+```
+
+Rules are pinned in `pyproject.toml` to `E4,E7,E9,F,I` - real bugs and import
+order, no stylistic rewrites. Add dependencies with `uv add --dev <pkg>`, never
+by editing `pyproject.toml` by hand.
+
+**Constraint: uv must never end up on the build path.** `tests/mksym.py` and
+`tests/mkdisk.py` are invoked as bare `python3` from `src/rom/Makefile` and
+`tests/Makefile`, and `docker/Dockerfile` carries `python3` and nothing else.
+Keep both scripts stdlib-only, and keep `uv run` out of every Makefile rule
+except `lint` and `fmt` - which is why `lint` skips rather than fails when uv
+is missing, so `make docker-make DOCKER_TARGET=test` still works.
+
+`tests/mksym.py` parses two different vasm listing formats: the pre-2.0
+`NAME LAB (0xADDR)` form and the 2.0+ `NAME A:ADDR` / `E:VALUE` /
+`SS:OFFSET EXP` forms. vasm changed this between 1.9 and 2.0, which silently
+broke the whole harness at the symbol-table step.
 
 ## Documentation
 

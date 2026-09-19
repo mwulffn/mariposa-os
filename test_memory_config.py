@@ -25,9 +25,9 @@ import time
 
 # From src/rom/hardware.i
 MEMMAP_TABLE = 0x3250
-KERNEL_CHIP = 0x4000            # start of kernel-managed chip RAM
-FAST_BASE = 0x200000            # where Zorro II RAM is relocated to
-KERNEL_STACK_SIZE = 0x2000      # reserved at the top of fast RAM
+KERNEL_CHIP = 0x4000  # start of kernel-managed chip RAM
+FAST_BASE = 0x200000  # where Zorro II RAM is relocated to
+KERNEL_STACK_SIZE = 0x2000  # reserved at the top of fast RAM
 ROM_BASE = 0xFC0000
 ROM_SIZE = 0x40000
 
@@ -38,27 +38,27 @@ MEM_TYPE_RESERVED = 6
 
 TYPE_NAME = {0: "End", 1: "Chip", 2: "Fast", 5: "ROM", 6: "Reserved"}
 
-ENTRY_LONGS = 3                 # base, size, (type << 16) | flags
+ENTRY_LONGS = 3  # base, size, (type << 16) | flags
 
 
 def config_from_makefile():
     """Whichever config `make run` will launch."""
     try:
-        m = re.search(r'^CONFIG\s*=\s*(\S+)', open('Makefile').read(), re.M)
+        m = re.search(r"^CONFIG\s*=\s*(\S+)", open("Makefile").read(), re.M)
         if m:
             return m.group(1)
     except OSError:
         pass
-    return 'configs/a600.fs-uae'
+    return "configs/a600.fs-uae"
 
 
 def parse_config(path):
     """Chip and fast RAM sizes in bytes, from an FS-UAE config."""
     chip_kb = fast_kb = 0
     for line in open(path):
-        m = re.match(r'\s*(chip_memory|fast_memory)\s*=\s*(\d+)', line)
+        m = re.match(r"\s*(chip_memory|fast_memory)\s*=\s*(\d+)", line)
         if m:
-            if m.group(1) == 'chip_memory':
+            if m.group(1) == "chip_memory":
                 chip_kb = int(m.group(2))
             else:
                 fast_kb = int(m.group(2))
@@ -74,8 +74,15 @@ def expected_entries(chip_bytes, fast_bytes):
     if fast_bytes:
         usable = fast_bytes - KERNEL_STACK_SIZE
         entries.append((FAST_BASE, usable, MEM_TYPE_FAST, 1, "fast RAM"))
-        entries.append((FAST_BASE + usable, KERNEL_STACK_SIZE,
-                        MEM_TYPE_RESERVED, 1, "kernel stack"))
+        entries.append(
+            (
+                FAST_BASE + usable,
+                KERNEL_STACK_SIZE,
+                MEM_TYPE_RESERVED,
+                1,
+                "kernel stack",
+            )
+        )
     entries.append((ROM_BASE, ROM_SIZE, MEM_TYPE_ROM, 0, "ROM"))
     entries.append((0, 0, 0, 0, "terminator"))
     return entries
@@ -99,7 +106,7 @@ class MemoryTest:
     def bad(self, what, detail=""):
         print("  FAIL  %s" % what)
         if detail:
-            for line in detail.rstrip().split('\n'):
+            for line in detail.rstrip().split("\n"):
                 print("          %s" % line)
         self.failed += 1
 
@@ -108,19 +115,21 @@ class MemoryTest:
     def start(self):
         print("Starting FS-UAE with %s ..." % self.config)
         self.emulator = subprocess.Popen(
-            ['make', 'run'],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            preexec_fn=os.setsid)
+            ["make", "run"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            preexec_fn=os.setsid,
+        )
         time.sleep(4)
 
     def connect(self):
-        print("Connecting to the debugger on localhost:5555 ...", end='', flush=True)
+        print("Connecting to the debugger on localhost:5555 ...", end="", flush=True)
         for attempt in range(10):
             try:
                 if self.sock:
                     self.sock.close()
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.sock.connect(('localhost', 5555))
+                self.sock.connect(("localhost", 5555))
                 print(" connected")
                 time.sleep(1)
                 # Keep the boot output rather than discarding it - the printed
@@ -131,14 +140,14 @@ class MemoryTest:
                         chunk = self.sock.recv(4096)
                         if not chunk:
                             break
-                        self.boot_log += chunk.decode('ascii', errors='replace')
+                        self.boot_log += chunk.decode("ascii", errors="replace")
                 except socket.timeout:
                     pass
                 self.sock.settimeout(5.0)
                 return True
             except (ConnectionRefusedError, OSError) as e:
                 if attempt < 9:
-                    print('.', end='', flush=True)
+                    print(".", end="", flush=True)
                     time.sleep(1)
                 else:
                     print(" failed: %s" % e)
@@ -146,9 +155,9 @@ class MemoryTest:
         return False
 
     def command(self, cmd):
-        self.sock.sendall((cmd + '\n').encode())
+        self.sock.sendall((cmd + "\n").encode())
         time.sleep(0.3)
-        out = b''
+        out = b""
         self.sock.settimeout(1.0)
         try:
             while True:
@@ -159,7 +168,7 @@ class MemoryTest:
         except socket.timeout:
             pass
         self.sock.settimeout(5.0)
-        return out.decode('ascii', errors='replace')
+        return out.decode("ascii", errors="replace")
 
     def stop(self):
         print("\nCleaning up ...")
@@ -187,11 +196,11 @@ class MemoryTest:
         while len(longs) < count:
             reply = self.command("m.l %x" % (addr + len(longs) * 4))
             raw.append(reply)
-            m = re.search(r'\$[0-9A-Fa-f]{8}:((?:\s+[0-9A-Fa-f]{8}){4})', reply)
+            m = re.search(r"\$[0-9A-Fa-f]{8}:((?:\s+[0-9A-Fa-f]{8}){4})", reply)
             if not m:
-                return None, ''.join(raw)
+                return None, "".join(raw)
             longs += [int(v, 16) for v in m.group(1).split()]
-        return longs[:count], ''.join(raw)
+        return longs[:count], "".join(raw)
 
     # --- the checks ------------------------------------------------------
 
@@ -200,9 +209,11 @@ class MemoryTest:
         if "Memory Map:" in self.boot_log:
             self.ok("ROM printed its memory map")
         else:
-            self.bad("ROM printed its memory map",
-                     "captured %d bytes, no 'Memory Map:' header:\n%s"
-                     % (len(self.boot_log), self.boot_log[-400:]))
+            self.bad(
+                "ROM printed its memory map",
+                "captured %d bytes, no 'Memory Map:' header:\n%s"
+                % (len(self.boot_log), self.boot_log[-400:]),
+            )
         for name in ("Reserved", "Chip", "ROM"):
             if name in self.boot_log:
                 self.ok("memory map mentions %s" % name)
@@ -213,8 +224,9 @@ class MemoryTest:
         print("\nMemory map table at $%06X" % MEMMAP_TABLE)
         longs, raw = self.read_longs(MEMMAP_TABLE, len(expected) * ENTRY_LONGS)
         if longs is None:
-            self.bad("read the table",
-                     "could not parse a dump out of:\n%s" % raw[-400:])
+            self.bad(
+                "read the table", "could not parse a dump out of:\n%s" % raw[-400:]
+            )
             return None
 
         for i, (base, size, mtype, flags, name) in enumerate(expected):
@@ -224,14 +236,26 @@ class MemoryTest:
             got_type, got_flags = packed >> 16, packed & 0xFFFF
 
             if (got_base, got_size, got_type, got_flags) == (base, size, mtype, flags):
-                self.ok("entry %d %-18s $%08X +$%08X %s"
-                        % (i, name, base, size, TYPE_NAME.get(mtype, "?")))
+                self.ok(
+                    "entry %d %-18s $%08X +$%08X %s"
+                    % (i, name, base, size, TYPE_NAME.get(mtype, "?"))
+                )
             else:
-                self.bad("entry %d %s" % (i, name),
-                         "expected base $%08X size $%08X type %d flags $%04X\n"
-                         "got      base $%08X size $%08X type %d flags $%04X"
-                         % (base, size, mtype, flags,
-                            got_base, got_size, got_type, got_flags))
+                self.bad(
+                    "entry %d %s" % (i, name),
+                    "expected base $%08X size $%08X type %d flags $%04X\n"
+                    "got      base $%08X size $%08X type %d flags $%04X"
+                    % (
+                        base,
+                        size,
+                        mtype,
+                        flags,
+                        got_base,
+                        got_size,
+                        got_type,
+                        got_flags,
+                    ),
+                )
         return longs
 
     def check_fast_ram_access(self, expected):
@@ -243,16 +267,20 @@ class MemoryTest:
         print("\nFast RAM read/write")
         # Somewhere near the bottom and somewhere near the top of what the
         # ROM says is usable - derived, so this cannot outlive the config.
-        for addr, value in ((base + 0x1000, 0xDEADBEEF),
-                            (base + size - 0x1000, 0xCAFEBABE)):
+        for addr, value in (
+            (base + 0x1000, 0xDEADBEEF),
+            (base + size - 0x1000, 0xCAFEBABE),
+        ):
             self.command("m %x %08X" % (addr, value))
             reply = self.command("m.l %x" % addr)
-            m = re.search(r'\$[0-9A-Fa-f]{8}:\s+([0-9A-Fa-f]{8})', reply)
+            m = re.search(r"\$[0-9A-Fa-f]{8}:\s+([0-9A-Fa-f]{8})", reply)
             if m and int(m.group(1), 16) == value:
                 self.ok("wrote and read back $%08X at $%06X" % (value, addr))
             else:
-                self.bad("wrote and read back $%08X at $%06X" % (value, addr),
-                         "reply was: %s" % reply.strip())
+                self.bad(
+                    "wrote and read back $%08X at $%06X" % (value, addr),
+                    "reply was: %s" % reply.strip(),
+                )
 
     # --- driver ----------------------------------------------------------
 
@@ -274,9 +302,11 @@ class MemoryTest:
         try:
             self.start()
             if not self.connect():
-                print("\nCould not reach the debugger. The ROM only drops into it "
-                      "when\nboot fails - if a bootable SYSTEM.BIN is present it "
-                      "runs the kernel\ninstead and never reaches the prompt.")
+                print(
+                    "\nCould not reach the debugger. The ROM only drops into it "
+                    "when\nboot fails - if a bootable SYSTEM.BIN is present it "
+                    "runs the kernel\ninstead and never reaches the prompt."
+                )
                 return 2
 
             self.check_boot_log()
@@ -298,5 +328,5 @@ def main(argv):
     return MemoryTest(config).run()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main(sys.argv))
