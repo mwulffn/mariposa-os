@@ -20,11 +20,18 @@ section number for a section-relative label (optionally marked EXP):
     SPRINTF_BUFFER                   E:00003400
     __divu                           00:00000000 EXP
 
+A vlink map (vlink -M) is also accepted, and is what the linked ROM build
+uses. It is the better source: addresses are already absolute, so nothing has
+to be biased, and it spans every object in the link rather than one assembly:
+
+      0x00fc010c install_exception_vectors: local reloc, size 0
+      0x00003400 SPRINTF_BUFFER: local abs, size 0
+
 Both are accepted. Output is one "name hexvalue" per line. Only global labels
 and equates are present - vasm does not export local labels (.foo), which is
 why tests can only target the routine entry points.
 
-Usage: mksym.py <listing> <output.sym>
+Usage: mksym.py <listing-or-map> <output.sym>
 """
 
 import re
@@ -39,6 +46,11 @@ EXPR = re.compile(r"^(\S+)\s+EXPR\s*\(\s*(-?\d+)\s*\)")
 # h_load_module()/h_add_symbols() want: they supply the load bias themselves.
 # Anchored at end of line so nothing in the disassembly body can match.
 TAGGED = re.compile(r"^(\S+)\s+(?:[AE]|\d+):([0-9a-fA-F]+)(?:\s+EXP)?\s*$")
+
+# vlink -M: "  0x00fc010c install_exception_vectors: local reloc, size 0".
+# Addresses are absolute here, so these need no bias. The lone "local abs file"
+# entry is the source filename, not a symbol, and is dropped.
+VLINK = re.compile(r"^\s+0x([0-9a-fA-F]+)\s+(\S+):\s+(.*)$")
 
 
 def parse(path):
@@ -59,6 +71,10 @@ def parse(path):
                 value = int(m.group(2))
                 if value >= 0:
                     syms[m.group(1)] = value
+                continue
+            m = VLINK.match(line)
+            if m and "file" not in m.group(3):
+                syms[m.group(2)] = int(m.group(1), 16)
     return syms
 
 

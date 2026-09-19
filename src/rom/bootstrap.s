@@ -11,7 +11,8 @@
 ; ============================================================
 ; ROM header
 ; ============================================================
-    org $FC0000
+    ; Placed by rom.ld. The ROM header must be first in .text.
+    section .text,code
 
 rom_start:
     dc.l    $3FFC               ; Offset 0: Initial SSP (temporary boot stack)
@@ -431,7 +432,8 @@ generic_exc_msg:
 ; ============================================================
 ; ROM footer - pad to 256KB and add checksum location
 ; ============================================================
-    org $FFFFFC
+    ; rom.ld pins this at $FFFFFC, the last longword of the ROM.
+    section .romend,data
 rom_end:
     dc.l    rom_start
 
