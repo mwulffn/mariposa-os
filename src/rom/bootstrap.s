@@ -425,7 +425,7 @@ generic_exc_msg:
     include "serial_glue.s"
     include "sprintf_glue.s"
     include "debugger.s"
-    include "ide.s"
+    include "ide_glue.s"
     include "partition.s"
     include "filesystem.s"
 

@@ -80,7 +80,9 @@ src/rom/                      - 256KB ROM, pure 68000 assembly
   sprintf_glue.s              - Stack ABI shim between callers and sprintf.c
   rom.ld                      - Linker script, 256KB image at $FC0000
   debugger.s                  - Interactive serial debugger
-  ide.s                       - IDE/ATA sector read (Gayle)
+  ide.c                       - Gayle register map + the boot device table
+  ide_glue.s                  - Register ABI shim between callers and ide.c
+  rom.h                       - Interface between the ROM's C modules
   partition.s                 - Rigid Disk Block and partition parsing
   filesystem.s                - FAT16 read, loads SYSTEM.BIN
   hardware.i                  - Hardware definitions and the low-memory map
@@ -89,6 +91,8 @@ src/rom/                      - 256KB ROM, pure 68000 assembly
 src/shared/                   - Compiled into BOTH the ROM and the kernel
   amiga_hw.h                  - Custom chip registers and bit definitions
   serial_hw.{c,h}             - Paula UART primitives; no waiting strategy
+  ata.{c,h}                   - LBA28 PIO reads; no register addresses
+  blkdev.h                    - Block device handle; seed of a device model
 src/kernel/
   crt0.s                      - Startup stub, receives control from the ROM
   libsup.s                    - 32-bit divide/modulo helpers vbcc calls
@@ -105,7 +109,7 @@ tests/                        - Headless 68000 test harness (see docs/testing.md
   test_format.c               - sprintf.c, the ABI shim, and serial formatting
   test_vectors.c              - ROM header, vector table, panic frame decoding
   test_irq.c                  - Paula interrupt registers, autovector dispatch
-  test_disk.c                 - ide.s, partition.s, filesystem.s
+  test_disk.c                 - ata.c/ide.c, partition.s, filesystem.s
   mksym.py                    - vasm listing -> flat symbol table
   mkdisk.py                   - Generates the RDB + FAT16 test disk images
 docker/Dockerfile             - Build image, toolchain from upstream source
@@ -133,7 +137,7 @@ code is the verdict: 0 pass, 1 test failed, 2 harness error.
 | `format.*` | `sprintf.c`, `sprintf_glue.s`, `serial_put_*`, `parse_hex` |
 | `rom.*` | ROM header, exception vector table, panic frame decoding |
 | `irq.*` | INTENA/INTREQ, interrupt levels, autovector dispatch, UART TBE |
-| `disk.*` | `ide.s`, `partition.s`, `filesystem.s` against a generated RDB + FAT16 image |
+| `disk.*` | `ata.c`, `ide.c`, `partition.s`, `filesystem.s` against a generated RDB + FAT16 image |
 
 Prefer this tier for anything that is pure logic. Use FS-UAE only for
 behaviour that needs real hardware. Nothing here proves the ROM boots.

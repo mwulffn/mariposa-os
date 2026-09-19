@@ -15,8 +15,9 @@
  * caller-visible buffer in chip RAM.
  */
 
-/* Scratch buffer in chip RAM, mirroring SPRINTF_BUFFER in hardware.i. */
-#define SPRINTF_BUFFER ((char *)0x3400)
+#include "rom.h"
+
+#define SPRINTF_BUFFER ROM_SPRINTF_BUFFER
 
 typedef unsigned long u32;
 
@@ -171,4 +172,15 @@ u32 rom_vsprintf(const char *fmt, const u32 *args)
 
     *out = '\0';
     return (u32)(out - SPRINTF_BUFFER);
+}
+
+/*
+ * Format and write it out. The ROM's C modules use this where the assembly
+ * would `pea` its arguments and `bsr SerialPrintf`; the argument array is
+ * the same shape either way.
+ */
+void rom_printf(const char *fmt, const u32 *args)
+{
+    rom_vsprintf(fmt, args);
+    rom_serial_put_string(SPRINTF_BUFFER);
 }

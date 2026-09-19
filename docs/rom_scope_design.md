@@ -166,9 +166,27 @@ So the conversion of `ide.s` should produce two pieces:
 - **Transport** - how a task-file register is reached and how a data word is
   read. Gayle IDE and PCMCIA differ here and nowhere else.
 
-A base-and-stride pair, or a small accessor struct, is enough. Retrofitting
-this after `partition.s` and `filesystem.s` have been written against a
-Gayle-shaped API is the expensive version.
+Done as a function pointer rather than base-and-stride, because Gayle's
+PCMCIA mapping splits the odd registers into a second window and no stride
+can describe that. `ata.c` contains no hardware address at all - that is the
+property worth checking, and it is checkable by grep.
+
+Honest caveat: the split is structural, not proven. Nothing exercises a
+second transport, because no second transport exists and adding a dummy one
+would be shipping dead code to satisfy a test. It stays unproven until
+something real uses it.
+
+### The device handle
+
+`src/shared/blkdev.h` is a `struct blkdev`: a name, a read function, a
+presence check and an opaque transport pointer. `src/rom/ide.c` holds a
+one-entry table and `blkdev_boot()` returns it.
+
+That is all it is, deliberately. There is no registration, no reference
+counting and no partition children, because nothing needs them yet. What it
+buys now is that RDB parsing, FAT16 and eventually the kernel's block I/O
+address a handle rather than Gayle, so growing into something closer to a
+device tree is a rewrite of one header rather than of everything above it.
 
 PCMCIA would additionally need card-present detect, a reset, a CIS tuple walk
 in attribute memory (8-bit on a 16-bit bus, so every other byte), and writing
@@ -210,9 +228,8 @@ self-contained, heavily tested, and the thing `rom2c` had already failed at.
 2. ~~`serial.s`~~ — done. Split into `src/shared/serial_hw.c` (primitives,
    shared) and `src/rom/serial.c` (polling, not shared), with
    `serial_glue.s` for the register ABI.
-3. `ide.s`, shared — **before** the layers above it, so the ATA/transport
-   split lands while there is only one implementation to shape it around.
-   The `disk.*` tests cover it against a generated image.
+3. ~~`ide.s`~~ — done. `src/shared/ata.c` is the protocol, `src/rom/ide.c`
+   is Gayle's register map and the device table, `ide_glue.s` is the ABI.
 4. `partition.s` and `filesystem.s`, shared, written against the block-device
    interface rather than against Gayle.
 5. `autoconfig.s` and `memory.s`.
