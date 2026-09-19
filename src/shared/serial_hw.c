@@ -49,8 +49,20 @@ int serial_hw_rx_ready(void)
     return (SERDATR_STATUS & STATF_RBF) != 0;
 }
 
-/* A word read: this is the access that takes the byte. */
+/*
+ * Take the pending byte and acknowledge it.
+ *
+ * The acknowledgement is not optional and is not implied by the read. RBF
+ * mirrors INTREQ bit 11; Paula clears it only when software writes INTREQ,
+ * and SERDATR keeps reporting the same character until that happens. Without
+ * this write the caller sees one keystroke repeat for ever - which is what
+ * the ROM's assembly receive path did, hidden by a test harness that used to
+ * clear RBF on read.
+ */
 unsigned char serial_hw_rx(void)
 {
-    return (unsigned char)(custom.serdatr & 0xFF);
+    unsigned char c = (unsigned char)(custom.serdatr & 0xFF);
+
+    custom.intreq = INTF_RBF;      /* bit 15 clear = clear these bits */
+    return c;
 }

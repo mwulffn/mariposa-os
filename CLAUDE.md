@@ -118,7 +118,7 @@ test_*.py                     - FS-UAE integration scripts
 ## Testing
 
 ```bash
-make test                      # headless, 144 tests, ~0.3s, no emulator needed
+make test                      # headless, 149 tests, ~0.3s, no emulator needed
 make test FILTER=rom.panic     # narrow to one group while iterating
 ```
 
@@ -132,7 +132,7 @@ code is the verdict: 0 pass, 1 test failed, 2 harness error.
 | `libsup.*` | `src/kernel/libsup.s`, assembled standalone - no C compiler needed |
 | `format.*` | `sprintf.c`, `sprintf_glue.s`, `serial_put_*`, `parse_hex` |
 | `rom.*` | ROM header, exception vector table, panic frame decoding |
-| `irq.*` | INTENA/INTREQ, interrupt levels, 68000 autovector dispatch |
+| `irq.*` | INTENA/INTREQ, interrupt levels, autovector dispatch, UART TBE |
 | `disk.*` | `ide.s`, `partition.s`, `filesystem.s` against a generated RDB + FAT16 image |
 
 Prefer this tier for anything that is pure logic. Use FS-UAE only for

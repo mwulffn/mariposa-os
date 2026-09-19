@@ -43,7 +43,10 @@ void serial_hw_tx(unsigned char c);
 /* Receive buffer full - a byte is waiting. */
 int serial_hw_rx_ready(void);
 
-/* Take the pending byte. Reading SERDATR as a word is what clears RBF. */
+/* Take the pending byte AND acknowledge it by clearing INTREQ's RBF bit.
+ * Reading SERDATR does not clear RBF - Paula keeps reporting the same
+ * character until software acknowledges, so a caller that skips this sees one
+ * keystroke for ever. */
 unsigned char serial_hw_rx(void);
 
 #endif /* SERIAL_HW_H */

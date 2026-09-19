@@ -358,6 +358,131 @@ static void t_level7_is_non_maskable(void)
     (void)r;
 }
 
+/* --- the serial transmitter ----------------------------------------------
+ *
+ * The transmitter takes time and raises TBE when its buffer frees. Both were
+ * missing from the model, which made the interrupt-driven transmit path in
+ * docs/serial_design.md impossible to test: a UART that is permanently ready
+ * never spins a polling loop and never raises an interrupt.
+ */
+
+/*
+ *      move.w  #$0141,$DFF030      ; send 'A' (bit 8 is the stop bit)
+ *      move.w  $DFF018,d1          ; status immediately after
+ *      moveq   #60,d0
+ *      dbf     d0,*                ; burn time
+ *      move.w  $DFF018,d2          ; status once it has drained
+ *      rts
+ */
+static uint32_t stub_send_and_sample(void)
+{
+    uint8_t code[24];
+    size_t n = 0;
+
+    put16(code + n, 0x33FC); n += 2;          /* move.w #imm,<abs.l> */
+    put16(code + n, 0x0141); n += 2;
+    put32(code + n, 0x00DFF030u); n += 4;     /* SERDAT */
+
+    put16(code + n, 0x3239); n += 2;          /* move.w <abs.l>,d1 */
+    put32(code + n, 0x00DFF018u); n += 4;     /* SERDATR */
+
+    put16(code + n, 0x7000 | 60); n += 2;     /* moveq #60,d0 */
+    put16(code + n, 0x51C8); n += 2;          /* dbf d0,... */
+    put16(code + n, 0xFFFE); n += 2;          /* ... to itself */
+
+    put16(code + n, 0x3439); n += 2;          /* move.w <abs.l>,d2 */
+    put32(code + n, 0x00DFF018u); n += 4;
+
+    put16(code + n, 0x4E75); n += 2;
+    return h_alloc(code, n);
+}
+
+#define SERDATF_TBE_  0x2000u
+#define SERDATF_TSRE_ 0x1000u
+
+static void t_tx_takes_time(void)
+{
+    uint32_t pc = stub_send_and_sample();
+    h_result r;
+    uint32_t busy, idle;
+
+    h_begin_call();
+    r = h_call(pc);
+    CHECK_CALL(r);
+
+    busy = h_get_d(1);
+    idle = h_get_d(2);
+
+    CHECK(!(busy & SERDATF_TBE_),  "TBE should be clear right after SERDAT");
+    CHECK(!(busy & SERDATF_TSRE_), "TSRE should be clear right after SERDAT");
+    CHECK(idle & SERDATF_TBE_,  "TBE should be set once the buffer frees");
+    CHECK(idle & SERDATF_TSRE_, "TSRE should be set once the shifter empties");
+
+    CHECK_STR("A", h_serial());
+}
+
+/*
+ *      move.w  #$0141,$DFF030      ; send
+ *      moveq   #60,d0
+ *      dbf     d0,*
+ *      rts
+ */
+static uint32_t stub_send_then_spin(void)
+{
+    uint8_t code[16];
+    size_t n = 0;
+
+    put16(code + n, 0x33FC); n += 2;
+    put16(code + n, 0x0141); n += 2;
+    put32(code + n, 0x00DFF030u); n += 4;
+    put16(code + n, 0x7000 | 60); n += 2;
+    put16(code + n, 0x51C8); n += 2;
+    put16(code + n, 0xFFFE); n += 2;
+    put16(code + n, 0x4E75); n += 2;
+    return h_alloc(code, n);
+}
+
+static void t_tbe_interrupt_fires(void)
+{
+    /* This is the mechanism the kernel's ring buffer will be built on: send a
+     * byte, and the level 1 TBE interrupt asks for the next one. */
+    uint32_t counter = counter_cell();
+    uint32_t handler = stub_handler(counter, H_INTF_TBE);
+    uint32_t body    = stub_send_then_spin();
+    h_result r;
+
+    h_poke32(0x064, handler);                      /* autovector 1 */
+    h_write_intena(H_INTF_SETCLR | H_INTF_INTEN | H_INTF_TBE);
+
+    h_begin_call();
+    h_set_sr(0x2000);
+    r = h_call(body);
+
+    CHECK_CALL(r);
+    CHECK_U32(1, h_peek32(counter));               /* fired once */
+    CHECK_U32(0, h_intreq());                      /* and the handler acked */
+}
+
+static void t_tbe_silent_until_transmit(void)
+{
+    /* An idle transmitter must not raise TBE on its own, or every test that
+     * enables level 1 would take a spurious interrupt. */
+    uint32_t counter = counter_cell();
+    uint32_t handler = stub_handler(counter, H_INTF_TBE);
+    uint32_t body    = stub_nops();
+    h_result r;
+
+    h_poke32(0x064, handler);
+    h_write_intena(H_INTF_SETCLR | H_INTF_INTEN | H_INTF_TBE);
+
+    h_begin_call();
+    h_set_sr(0x2000);
+    r = h_call(body);
+
+    CHECK_CALL(r);
+    CHECK_U32(0, h_peek32(counter));
+}
+
 /* --- the ROM's own handler ----------------------------------------------- */
 
 static void t_rom_autovector_reaches_panic(void)
@@ -404,6 +529,9 @@ static const test_case tests[] = {
     { "unacked_reenters",       t_unacked_interrupt_reenters, NULL },
     { "level7_non_maskable",    t_level7_is_non_maskable,    NULL },
     { "rom_autovector_panics",  t_rom_autovector_reaches_panic, NULL },
+    { "tx_takes_time",          t_tx_takes_time,             NULL },
+    { "tbe_interrupt_fires",    t_tbe_interrupt_fires,       NULL },
+    { "tbe_silent_until_tx",    t_tbe_silent_until_transmit, NULL },
 };
 
 const test_suite irq_suite = { "irq", tests, sizeof tests / sizeof tests[0] };

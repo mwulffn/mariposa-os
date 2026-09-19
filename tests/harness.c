@@ -27,6 +27,11 @@ static void fault(const char *fmt, ...)
     }
 }
 
+/* Paula's interrupt registers, modelled further down - the UART needs them:
+ * RBF and TBE are interrupt bits before they are status bits. */
+static uint16_t g_intreq;
+static void irq_update(void);
+
 /* ------------------------------------------------------- serial (Paula UART) */
 
 #define CUSTOM_BASE 0xDFF000u
@@ -44,13 +49,56 @@ static char   g_rx[4096];
 static size_t g_rx_len;
 static size_t g_rx_pos;
 
+/* --- transmitter timing --------------------------------------------------
+ *
+ * The transmitter is not instant. It used to be, which meant no polling loop
+ * ever spun, TBE and TSRE were indistinguishable, and the TBE interrupt could
+ * never fire - so the interrupt-driven transmit path in docs/serial_design.md
+ * was untestable by construction.
+ *
+ * The delays are deliberately much shorter than 9600 baud (~7400 cycles a
+ * character), which would make the disk tests crawl for no extra coverage.
+ * They only have to be non-zero, and TSRE has to trail TBE.
+ */
+static uint64_t g_cycles;          /* free-running, survives across h_call */
+static uint64_t g_tbe_at;          /* cycle the buffer frees */
+static uint64_t g_tsre_at;         /* cycle the shifter empties */
+static uint64_t g_tbe_cycles  = 64;
+static uint64_t g_tsre_cycles = 128;
+static int      g_tbe_signalled;   /* INTREQ TBE already raised for this byte */
+
 static uint16_t serdatr_value(void)
 {
-    /* Transmitter is always ready - nothing here is rate limited. */
-    uint16_t v = SERDATF_TBE | SERDATF_TSRE;
-    if (g_rx_pos < g_rx_len)
+    uint16_t v = 0;
+
+    if (g_cycles >= g_tbe_at)  v |= SERDATF_TBE;
+    if (g_cycles >= g_tsre_at) v |= SERDATF_TSRE;
+
+    /* RBF mirrors INTREQ bit 11 and is cleared by writing INTREQ, never by
+     * reading SERDATR - see the receive note in harness.h. */
+    if ((g_intreq & H_INTF_RBF) && g_rx_pos < g_rx_len)
         v |= SERDATF_RBF | (uint8_t)g_rx[g_rx_pos];
     return v;
+}
+
+/* Paula latches the next byte as soon as software acknowledges the last. */
+static void serial_rx_latch(void)
+{
+    if (!(g_intreq & H_INTF_RBF) && g_rx_pos < g_rx_len)
+        g_intreq |= H_INTF_RBF;
+}
+
+/* Called once per instruction: raise TBE when the buffer frees, so a ring
+ * buffer driven by the level 1 interrupt can actually be tested. The
+ * power-on state, where Paula has TBE set before anything is sent, is not
+ * modelled - TBE is only raised as a consequence of a transmission. */
+static void serial_tx_tick(void)
+{
+    if (!g_tbe_signalled && g_cycles >= g_tbe_at) {
+        g_tbe_signalled = 1;
+        g_intreq |= H_INTF_TBE;
+        irq_update();
+    }
 }
 
 /* ------------------------------------------------------------- guest access */
@@ -116,7 +164,6 @@ static int stub_region(uint32_t addr, uint32_t *read_value)
 #define REG_INTREQ  0x09Cu
 
 static uint16_t g_intena;
-static uint16_t g_intreq;
 static int      g_irq_forced;      /* -1 = not forced */
 
 /* Which CPU level each INTREQ bit raises. Index is the bit number; entries
@@ -183,7 +230,17 @@ void h_write_intena(uint16_t val)
 
 void h_write_intreq(uint16_t val)
 {
+    uint16_t before = g_intreq;
+
     g_intreq = setclr(g_intreq, val);
+
+    /* Clearing RBF is the acknowledgement that consumes the byte. Until it
+     * happens SERDATR keeps reporting the same character, which is what
+     * hardware does and what the old model papered over. */
+    if ((before & H_INTF_RBF) && !(g_intreq & H_INTF_RBF) && g_rx_pos < g_rx_len)
+        g_rx_pos++;
+
+    serial_rx_latch();
     irq_update();
 }
 
@@ -394,12 +451,8 @@ static uint32_t custom_read(uint32_t addr, int size)
      * character, so that is where the receive buffer is consumed. The byte
      * reads are serial_put_char's and serial_get_char's btst polling the
      * high half - those must not consume anything. */
-    if (off == REG_SERDATR && size == 2) {
-        uint16_t v = serdatr_value();
-        if (g_rx_pos < g_rx_len)
-            g_rx_pos++;
-        return v;
-    }
+    if (off == REG_SERDATR && size == 2)
+        return serdatr_value();
     if (off == REG_SERDATR && size == 1) return serdatr_value() >> 8;
     if (off == REG_SERDATR + 1 && size == 1) return serdatr_value() & 0xFF;
 
@@ -419,6 +472,9 @@ static void custom_write(uint32_t addr, int size, uint32_t val)
     if (off == REG_SERDAT) {
         if (g_tx_len + 1 < sizeof g_tx)
             g_tx[g_tx_len++] = (char)(val & 0xFF);
+        g_tbe_at  = g_cycles + g_tbe_cycles;
+        g_tsre_at = g_cycles + g_tsre_cycles;
+        g_tbe_signalled = 0;
         return;
     }
     if (off == REG_INTENA) { h_write_intena((uint16_t)val); return; }
@@ -771,7 +827,12 @@ h_result h_run(uint32_t pc)
         }
         /* One instruction at a time: the run loop has to see PC land on a
          * sentinel, and a multi-instruction slice could step straight past it. */
-        r.cycles += (uint64_t)m68k_execute(1);
+        {
+            uint64_t n = (uint64_t)m68k_execute(1);
+            r.cycles += n;
+            g_cycles += n;
+            serial_tx_tick();
+        }
     }
 
     /* A fault during an otherwise clean return still fails the call. */
@@ -795,6 +856,8 @@ void h_serial_input(const char *s)
     memcpy(g_rx, s, n);
     g_rx_len = n;
     g_rx_pos = 0;
+    serial_rx_latch();
+    irq_update();
 }
 
 void h_reset(void)
@@ -810,6 +873,9 @@ void h_reset(void)
     g_rx_len = g_rx_pos = 0;
     g_intena = g_intreq = 0;
     g_irq_forced = -1;
+    g_cycles = 0;
+    g_tbe_at = g_tsre_at = 0;
+    g_tbe_signalled = 1;       /* idle transmitter, nothing sent yet */
     g_budget = H_DEFAULT_BUDGET;   /* a test that lowered it must not leak it */
     g_fault_count = 0;
     g_fault_detail[0] = '\0';

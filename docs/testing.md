@@ -132,10 +132,24 @@ recorded as a fault and fails the test, rather than silently reading zero.
 - **Stubs** that exist only to stop routines hanging: CIA-A/B and Zorro
   autoconfig space (reports no card).
 
-One deliberate deviation from hardware: the model clears RBF when the guest
-reads `SERDATR` as a word, whereas Paula needs an `INTREQ` write to ack.
-Without it `serial_get_char`, which never acks, would spin forever. A test of
-the ack path itself has to check `INTREQ` directly.
+The UART is modelled the way Paula behaves, in both directions:
+
+- **Receive.** RBF mirrors `INTREQ` bit 11. Reading `SERDATR` does not clear
+  it; the next byte latches only when software writes `INTREQ`. Code that
+  reads without acknowledging sees the same character for ever.
+- **Transmit.** Sending takes time. `TBE` and `TSRE` go low on a `SERDAT`
+  write and come back after a delay, with `TSRE` trailing, and `INTREQ`'s
+  `TBE` bit is raised when the buffer frees.
+
+Neither used to be true. The transmitter was permanently ready, so no polling
+loop ever spun and the level 1 `TBE` interrupt could never fire - which made
+the interrupt-driven transmit path in `docs/serial_design.md` untestable by
+construction. And RBF was cleared on a word read, a behaviour neither Paula
+nor FS-UAE has, which is covered under "What the suite found" below.
+
+The transmit delays are far shorter than real 9600 baud (~7400 cycles a
+character). They only have to be non-zero and correctly ordered; real baud
+timing would make the disk tests crawl for no extra coverage.
 
 ### The interrupt tier
 
@@ -211,8 +225,24 @@ catch.
 
 ## What the suite found
 
+**A receive path that never acknowledged.** `serial_get_char` and
+`serial_wait_char` read `SERDATR` and returned the byte, but never wrote
+`INTREQ` to clear RBF. On hardware RBF stays set and `SERDATR` keeps
+reporting the same character, so the debugger's line reader would have taken
+one keystroke and repeated it for ever. Confirmed against FS-UAE's own source
+rather than assumed: `custom.cpp` reads `SERDATR` with no side effect, and
+`serial.cpp` holds `serdat` at `0x4100|byte` until the next byte arrives.
+
+It survived because the harness was covering for it - the model cleared RBF
+on a word read, with a comment saying that without it "the ROM's
+serial_get_char, which never acks, would spin forever". That is a bug report,
+not a modelling decision. The receive path also had no tests at all.
+`format.debugger_reads_line` now fails with a 20-million-cycle timeout if the
+acknowledgement is removed.
+
+
 Everything it turned up has been fixed, and the tests that found each bug now
-guard the fix. The suite is 144 tests, no xfails.
+guard the fix. The suite is 149 tests, no xfails.
 
 The storage path was in good shape from the start: `ide.s`, `find_rdb`, the
 FAT16 boot-sector parse, the directory scan, the chain walk and

@@ -543,7 +543,46 @@ static void t_wait_char_returns_byte(void)
     CHECK_U32('Z', h_get_d(0) & 0xFF);
 }
 
+/* --- the debugger's line reader ------------------------------------------
+ *
+ * dbg_read_line is the only consumer of the receive path, and had no coverage
+ * at all - which is how a receive path that never acknowledged RBF survived.
+ * On hardware that reads one keystroke for ever, so this is the test that
+ * would have caught it end to end.
+ */
+static void t_debugger_reads_a_line(void)
+{
+    char buf[64];
+    h_result r;
+
+    h_serial_input("m fc0000\r");
+
+    h_begin_call();
+    r = h_call(h_sym("dbg_read_line"));
+    CHECK_CALL(r);
+
+    h_peekstr(h_sym("DBG_CMD_BUF"), buf, sizeof buf);
+    CHECK_STR("m fc0000", buf);
+}
+
+static void t_debugger_handles_backspace(void)
+{
+    char buf[64];
+    h_result r;
+
+    h_serial_input("rx\bz\r");           /* 'x' rubbed out, 'z' typed */
+
+    h_begin_call();
+    r = h_call(h_sym("dbg_read_line"));
+    CHECK_CALL(r);
+
+    h_peekstr(h_sym("DBG_CMD_BUF"), buf, sizeof buf);
+    CHECK_STR("rz", buf);
+}
+
 static const test_case tests[] = {
+    { "debugger_reads_line",     t_debugger_reads_a_line,   NULL },
+    { "debugger_backspace",      t_debugger_handles_backspace, NULL },
     { "get_char_when_empty",     t_get_char_when_empty,     NULL },
     { "get_char_takes_one_byte", t_get_char_takes_one_byte, NULL },
     { "wait_char_returns_byte",  t_wait_char_returns_byte,  NULL },

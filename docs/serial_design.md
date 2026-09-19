@@ -35,6 +35,13 @@ The kernel still needs a polled path for panic, before interrupts are up and
 after they have stopped being trustworthy. That is the same primitives called
 directly, not a second driver.
 
+## Acknowledging received bytes
+
+`serial_hw_rx()` writes `INTREQ` to clear RBF as part of taking the byte.
+This is not optional: RBF mirrors `INTREQ` bit 11, reading `SERDATR` has no
+side effect, and Paula keeps reporting the same character until software
+acknowledges. A receive path that skips it reads one keystroke for ever.
+
 ## Overview
 
 Kernel serial is transmit-only, interrupt-driven. A 1024-byte ring buffer decouples kprintf callers from the 9600 baud wire speed. On crash, the kernel drops to the ROM debugger which register-bangs the UART directly, bypassing the ring buffer and interrupts entirely.

@@ -151,10 +151,15 @@ void        h_serial_clear(void);
 
 /* Queue input for serial_get_char / serial_wait_char.
  *
- * Deviation from real hardware, deliberate: the model clears RBF when the
- * guest reads SERDATR as a word, whereas Paula requires an INTREQ write to
- * ack. Without this the ROM's serial_get_char, which never acks, would spin
- * forever. Any test of the ack path itself has to check INTREQ directly.
+ * RBF is modelled the way Paula behaves: it mirrors INTREQ bit 11, reading
+ * SERDATR does not clear it, and the next byte only latches once software
+ * acknowledges by writing INTREQ. Code that reads without acknowledging sees
+ * the same character for ever.
+ *
+ * This used to be faked - the model cleared RBF on a word read - which hid
+ * the fact that the ROM's receive path never acknowledged. Verified against
+ * FS-UAE: custom.cpp reads SERDATR with no side effect, and serial.cpp keeps
+ * serdat at 0x4100|byte until the next byte arrives.
  */
 void h_serial_input(const char *s);
 
@@ -162,6 +167,10 @@ void h_serial_input(const char *s);
  *
  * Paula's interrupt registers and the 68000 IPL lines, modelled properly
  * enough to test autovector dispatch on a real 68000 core.
+ *
+ * The UART sits on top of these: RBF (bit 11) and TBE (bit 0) are interrupt
+ * bits before they are status bits, so the serial model above and this one
+ * are the same mechanism seen from two sides.
  *
  * INTENA ($DFF09A) and INTREQ ($DFF09C) are write-only SET/CLR registers:
  * bit 15 set means "set the bits I name", bit 15 clear means "clear them".
