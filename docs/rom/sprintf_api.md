@@ -24,10 +24,15 @@ preserved.
 Formats into `SPRINTF_BUFFER` ($3400, 256 bytes) and returns `A0` = buffer,
 `D0.l` = length.
 
-> **Not callable directly.** `Sprintf` reads its format pointer at a fixed
-> stack offset that assumes it was reached by `bsr` from `SerialPrintf`. A
-> direct `bsr Sprintf` picks up the first argument as the format string.
-> Use `SerialPrintf`, or fix the offset first if you need a string back.
+Callable directly, as is `SerialPrintf`. Each computes its own argument
+pointer from its own frame rather than routing through the other, which is
+what the assembly version could not do: it read the format pointer at a fixed
+`60(sp)`, an offset only correct when `SerialPrintf` had reached it by `bsr`.
+
+> **Implementation.** The formatting is `src/rom/sprintf.c`; `sprintf_glue.s`
+> turns the caller-pushed frame into the `(format, args)` pair C takes and
+> preserves `d1-d7`/`a1-a6`, which the assembly version guaranteed and vbcc
+> does not. Call sites did not change.
 
 ## Format syntax
 
@@ -183,5 +188,4 @@ buffer. Nothing enforces the limit.
 - No lowercase hex
 - No floating point
 - Width applies to hex only, not binary or decimal
-- `Sprintf` is not directly callable (see above)
 - No buffer overflow protection

@@ -423,7 +423,7 @@ generic_exc_msg:
     include "autoconfig.s"
     include "memory.s"
     include "serial.s"
-    include "sprintf.s"
+    include "sprintf_glue.s"
     include "debugger.s"
     include "ide.s"
     include "partition.s"

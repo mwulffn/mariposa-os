@@ -25,9 +25,14 @@ ASM_INC  = $(filter-out $(ASM_MAIN),$(wildcard *.s))
 INCS     = $(wildcard *.i)
 
 # C sources, each compiled to assembly by vbcc then assembled to ELF.
-CSRC =
+CSRC = sprintf.c
 
-OBJ = $(BUILD)/bootstrap.o $(CSRC:%.c=$(BUILD)/%.o)
+# vbcc calls __divu for the / and % in %d. That lives in the kernel's
+# libsup.s, which is position independent and already covered by the
+# libsup.* tests - shared rather than reimplemented here.
+LIBSUP_SRC = ../kernel/libsup.s
+
+OBJ = $(BUILD)/bootstrap.o $(CSRC:%.c=$(BUILD)/%.o) $(BUILD)/libsup.o
 
 .PHONY: all clean
 
@@ -38,6 +43,9 @@ $(BUILD):
 
 $(BUILD)/bootstrap.o: $(ASM_MAIN) $(ASM_INC) $(INCS) | $(BUILD)
 	$(ASM) $(AFLAGS) -o $@ $(ASM_MAIN)
+
+$(BUILD)/libsup.o: $(LIBSUP_SRC) | $(BUILD)
+	$(ASM) $(AFLAGS) -o $@ $<
 
 $(BUILD)/%.asm: %.c | $(BUILD)
 	$(CC68) $(CFLAGS) -o=$@ $<

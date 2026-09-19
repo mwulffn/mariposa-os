@@ -212,7 +212,7 @@ catch.
 ## What the suite found
 
 Everything it turned up has been fixed, and the tests that found each bug now
-guard the fix. The suite is 140 tests, no xfails.
+guard the fix. The suite is 141 tests, no xfails.
 
 The storage path was in good shape from the start: `ide.s`, `find_rdb`, the
 FAT16 boot-sector parse, the directory scan, the chain walk and

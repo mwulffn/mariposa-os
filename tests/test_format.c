@@ -40,6 +40,22 @@ static const char *rom_printf1(const char *fmt, uint32_t a)
     return rom_printf(fmt, &a, 1);
 }
 
+/* Call Sprintf directly, which the assembly implementation could not support:
+ * it read its format pointer at a fixed 60(sp), an offset only correct when
+ * SerialPrintf had reached it via bsr. Returns A0 = buffer, D0 = length. */
+static h_result rom_sprintf(const char *fmt, const uint32_t *args, int nargs)
+{
+    uint32_t fmt_addr = h_str(fmt);
+    int i;
+
+    h_begin_call();
+    for (i = nargs - 1; i >= 0; i--)
+        h_push32(args[i]);
+    h_push32(fmt_addr);
+
+    return h_call(h_sym("Sprintf"));
+}
+
 /* --- literals ----------------------------------------------------------- */
 
 static void t_literal(void)
@@ -465,7 +481,22 @@ static void t_parse_hex_no_digits(void)
 
 /* ------------------------------------------------------------------------ */
 
+static void t_sprintf_callable_directly(void)
+{
+    /* The assembly version picked up the first argument as the format string
+     * when called without SerialPrintf's extra frame in between. */
+    uint32_t arg = 0xDEADBEEFu;
+    char buf[64];
+    h_result r = rom_sprintf("v=%x", &arg, 1);
+
+    CHECK_CALL(r);
+    h_peekstr(h_get_a(0), buf, sizeof buf);
+    CHECK_STR("v=DEADBEEF", buf);
+    CHECK_U32(10, h_get_d(0));          /* returned length */
+}
+
 static const test_case tests[] = {
+    { "sprintf_direct",          t_sprintf_callable_directly, NULL },
     { "literal",                 t_literal,                 NULL },
     { "empty",                   t_empty,                   NULL },
     { "percent_escape",          t_percent_escape,          NULL },

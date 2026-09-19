@@ -40,7 +40,11 @@ mtools (for deployment). `make test` additionally needs a host C compiler and,
 on first run, git to fetch Musashi; it also runs `make lint`, which uses uv if
 present and is skipped if not.
 
-**ROM assembler flags:** `-Fbin -m68000 -no-opt`
+**ROM build:** assembled and compiled to ELF objects, then linked into the
+raw 256KB image by `vlink -b rawbin1 -T rom.ld`. Assembler flags
+`-Felf -m68000 -no-opt`, vbcc `-cpu=68000 -O=1`. `bootstrap.s` still includes
+the other `.s` files, so the assembly is one object; C sources are separate
+ones. See `docs/rom_scope_design.md`.
 
 **Kernel deployment:** The `deploy` target copies `SYSTEM.BIN` to the FAT16 filesystem on `harddrives/boot.hdf` using mtools. The `run` target automatically triggers deployment.
 
@@ -71,14 +75,16 @@ src/rom/                      - 256KB ROM, pure 68000 assembly
   autoconfig.s                - Zorro II expansion autoconfig
   memory.s                    - Memory detection, map table, map printing
   serial.s                    - Serial port I/O (polled)
-  sprintf.s                   - Formatted output (see docs/rom/sprintf_api.md)
+  sprintf.c                   - Formatted output (see docs/rom/sprintf_api.md)
+  sprintf_glue.s              - Stack ABI shim between callers and sprintf.c
+  rom.ld                      - Linker script, 256KB image at $FC0000
   debugger.s                  - Interactive serial debugger
   ide.s                       - IDE/ATA sector read (Gayle)
   partition.s                 - Rigid Disk Block and partition parsing
   filesystem.s                - FAT16 read, loads SYSTEM.BIN
   hardware.i                  - Hardware definitions and the low-memory map
   build/kick.rom              - Compiled ROM (256KB)
-  build/kick.sym              - Symbol table for the tests, from vasm's listing
+  build/kick.sym              - Symbol table for the tests, from the vlink map
 src/kernel/
   crt0.s                      - Startup stub, receives control from the ROM
   libsup.s                    - 32-bit divide/modulo helpers vbcc calls
@@ -92,7 +98,7 @@ tests/                        - Headless 68000 test harness (see docs/testing.md
   protocol.{c,h}              - The ### result protocol and exit codes
   test_math.c                 - src/rom/math.s
   test_libsup.c               - src/kernel/libsup.s
-  test_format.c               - sprintf.s and the serial formatting helpers
+  test_format.c               - sprintf.c, the ABI shim, and serial formatting
   test_vectors.c              - ROM header, vector table, panic frame decoding
   test_irq.c                  - Paula interrupt registers, autovector dispatch
   test_disk.c                 - ide.s, partition.s, filesystem.s
@@ -108,7 +114,7 @@ test_*.py                     - FS-UAE integration scripts
 ## Testing
 
 ```bash
-make test                      # headless, 140 tests, ~0.3s, no emulator needed
+make test                      # headless, 141 tests, ~0.3s, no emulator needed
 make test FILTER=rom.panic     # narrow to one group while iterating
 ```
 
@@ -120,7 +126,7 @@ code is the verdict: 0 pass, 1 test failed, 2 harness error.
 |-------|--------|
 | `math.*` | `src/rom/math.s` |
 | `libsup.*` | `src/kernel/libsup.s`, assembled standalone - no C compiler needed |
-| `format.*` | `sprintf.s`, `serial_put_*`, `parse_hex` |
+| `format.*` | `sprintf.c`, `sprintf_glue.s`, `serial_put_*`, `parse_hex` |
 | `rom.*` | ROM header, exception vector table, panic frame decoding |
 | `irq.*` | INTENA/INTREQ, interrupt levels, 68000 autovector dispatch |
 | `disk.*` | `ide.s`, `partition.s`, `filesystem.s` against a generated RDB + FAT16 image |
@@ -229,8 +235,6 @@ from disk. Both are covered by the `disk.*` tests.
   the first partition is reachable.
 - The debugger's `g` does not restore A7 - it RTEs onto the debugger's own
   stack. `DBG_STACK` is defined, unused, and at an odd address.
-- `Sprintf` cannot be called directly; only via `SerialPrintf`. See
-  `docs/rom/sprintf_api.md`.
 - A fresh clone cannot `make run`: nothing creates `harddrives/boot.hdf`.
 - `detect_fast_ram` sizes memory by probing one megabyte past the end, and
   relies on the failed read-back to stop. That works on a floating Zorro II
