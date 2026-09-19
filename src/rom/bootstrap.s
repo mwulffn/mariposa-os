@@ -418,7 +418,6 @@ generic_exc_msg:
 ; ============================================================
 ; Include panic, autoconfig, memory, serial, sprintf, and debugger modules
 ; ============================================================
-    include "math.s"
     include "panic.s"
     include "autoconfig.s"
     include "memory.s"

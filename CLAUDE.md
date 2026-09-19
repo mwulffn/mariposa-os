@@ -71,7 +71,6 @@ Makefile                      - Build orchestrator (rom, kernel, test, docker)
 src/rom/                      - 256KB ROM, pure 68000 assembly
   bootstrap.s                 - Entry point, hardware init, vectors, boot sequence
   panic.s                     - Panic handler, register dump, exception entry points
-  math.s                      - 32-bit multiply and divide-by-10; ORPHANED, see Known issues
   autoconfig.s                - Zorro II expansion autoconfig
   memory.s                    - Memory detection, map table, map printing
   serial.c                    - Serial port I/O (polled, see serial_glue.s)
@@ -106,7 +105,6 @@ src/kernel/
 tests/                        - Headless 68000 test harness (see docs/testing.md)
   harness.{c,h}               - Machine model, symbol lookup, call/run, disk model
   protocol.{c,h}              - The ### result protocol and exit codes
-  test_math.c                 - src/rom/math.s
   test_libsup.c               - src/kernel/libsup.s
   test_format.c               - sprintf.c, the ABI shim, and serial formatting
   test_vectors.c              - ROM header, vector table, panic frame decoding
@@ -124,7 +122,7 @@ test_*.py                     - FS-UAE integration scripts
 ## Testing
 
 ```bash
-make test                      # headless, 149 tests, ~0.3s, no emulator needed
+make test                      # headless, 128 tests, ~0.3s, no emulator needed
 make test FILTER=rom.panic     # narrow to one group while iterating
 ```
 
@@ -134,7 +132,6 @@ code is the verdict: 0 pass, 1 test failed, 2 harness error.
 
 | Suite | Covers |
 |-------|--------|
-| `math.*` | `src/rom/math.s` |
 | `libsup.*` | `src/kernel/libsup.s`, assembled standalone - no C compiler needed |
 | `format.*` | `sprintf.c`, `sprintf_glue.s`, `serial_put_*`, `parse_hex` |
 | `rom.*` | ROM header, exception vector table, panic frame decoding |
@@ -245,10 +242,6 @@ from disk. Both are covered by the `disk.*` tests.
   the first partition is reachable. Carried over unchanged from the assembly
   during the C conversion; fixing it needs a test image whose partition list
   is not at block 1.
-- `math.s` is no longer called by anything. `mul32x16` and `divu32_10` existed
-  because the 68000 has no 32-bit multiply or divide; the C now gets both from
-  vbcc and `libsup.s`. It is 120 bytes of dead ROM kept alive only by the
-  `math.*` tests - delete both, or keep it deliberately.
 - The debugger's `g` does not restore A7 - it RTEs onto the debugger's own
   stack. `DBG_STACK` is defined, unused, and at an odd address.
 - A fresh clone cannot `make run`: nothing creates `harddrives/boot.hdf`.

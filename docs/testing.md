@@ -242,7 +242,7 @@ acknowledgement is removed.
 
 
 Everything it turned up has been fixed, and the tests that found each bug now
-guard the fix. The suite is 149 tests, no xfails.
+guard the fix. The suite is 128 tests, no xfails.
 
 The storage path was in good shape from the start: `ide.s`, `find_rdb`, the
 FAT16 boot-sector parse, the directory scan, the chain walk and
@@ -261,8 +261,11 @@ order. The formatting code was where the bugs lived.
   up. On overflow the 68000 leaves the destination untouched, so the digits
   were garbage rather than obviously wrong.
 
-Both now go through `src/rom/math.s` (`mul32x16`, `divu32_10`), swept against
-host arithmetic over a few thousand values.
+Both were fixed in assembly first, via `src/rom/math.s` (`mul32x16`,
+`divu32_10`), and swept against host arithmetic over a few thousand values.
+Both call sites are now C, where vbcc expands a 32x32 multiply into three
+`mulu.w` and `libsup.s` supplies the division, so `math.s` and the `math.*`
+suite were removed once nothing called them.
 
 **A format syntax that did not match its own documentation.** `sprintf.s`
 accepted the size modifier only *before* the specifier (`%.lx`), while almost

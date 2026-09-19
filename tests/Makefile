@@ -33,7 +33,7 @@ CFLAGS_TEST    = -std=c99 -O1 -g -Wall -Wextra -I. -I$(BUILD) -I$(MUSASHI_DIR)
 CFLAGS_MUSASHI = -O2 -g -w -I$(MUSASHI_DIR) -DM68K_EMULATE_INT_ACK=1
 LDLIBS         = -lm
 
-TEST_SRC = main.c protocol.c harness.c test_math.c test_format.c \
+TEST_SRC = main.c protocol.c harness.c test_format.c \
            test_vectors.c test_irq.c test_disk.c test_libsup.c
 TEST_OBJ = $(TEST_SRC:%.c=$(BUILD)/%.o)
 
