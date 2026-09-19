@@ -71,7 +71,7 @@ Makefile                      - Build orchestrator (rom, kernel, test, docker)
 src/rom/                      - 256KB ROM, pure 68000 assembly
   bootstrap.s                 - Entry point, hardware init, vectors, boot sequence
   panic.s                     - Panic handler, register dump, exception entry points
-  math.s                      - 32-bit multiply and divide-by-10 (68000 has neither)
+  math.s                      - 32-bit multiply and divide-by-10; ORPHANED, see Known issues
   autoconfig.s                - Zorro II expansion autoconfig
   memory.s                    - Memory detection, map table, map printing
   serial.c                    - Serial port I/O (polled, see serial_glue.s)
@@ -83,8 +83,8 @@ src/rom/                      - 256KB ROM, pure 68000 assembly
   ide.c                       - Gayle register map + the boot device table
   ide_glue.s                  - Register ABI shim between callers and ide.c
   rom.h                       - Interface between the ROM's C modules
-  partition.s                 - Rigid Disk Block and partition parsing
-  filesystem.s                - FAT16 read, loads SYSTEM.BIN
+  disk.c                      - Boot path across the disk: what to read, what to say
+  disk_glue.s                 - Register ABI shim between callers and disk.c
   hardware.i                  - Hardware definitions and the low-memory map
   build/kick.rom              - Compiled ROM (256KB)
   build/kick.sym              - Symbol table for the tests, from the vlink map
@@ -92,6 +92,8 @@ src/shared/                   - Compiled into BOTH the ROM and the kernel
   amiga_hw.h                  - Custom chip registers and bit definitions
   serial_hw.{c,h}             - Paula UART primitives; no waiting strategy
   ata.{c,h}                   - LBA28 PIO reads; no register addresses
+  rdb.{c,h}                   - Rigid Disk Block parsing; returns structs, prints nothing
+  fat16.{c,h}                 - Read-only FAT16; returns structs, prints nothing
   blkdev.h                    - Block device handle; seed of a device model
 src/kernel/
   crt0.s                      - Startup stub, receives control from the ROM
@@ -109,7 +111,7 @@ tests/                        - Headless 68000 test harness (see docs/testing.md
   test_format.c               - sprintf.c, the ABI shim, and serial formatting
   test_vectors.c              - ROM header, vector table, panic frame decoding
   test_irq.c                  - Paula interrupt registers, autovector dispatch
-  test_disk.c                 - ata.c/ide.c, partition.s, filesystem.s
+  test_disk.c                 - ata.c/ide.c, rdb.c, fat16.c, disk.c
   mksym.py                    - vasm listing -> flat symbol table
   mkdisk.py                   - Generates the RDB + FAT16 test disk images
 docker/Dockerfile             - Build image, toolchain from upstream source
@@ -137,7 +139,7 @@ code is the verdict: 0 pass, 1 test failed, 2 harness error.
 | `format.*` | `sprintf.c`, `sprintf_glue.s`, `serial_put_*`, `parse_hex` |
 | `rom.*` | ROM header, exception vector table, panic frame decoding |
 | `irq.*` | INTENA/INTREQ, interrupt levels, autovector dispatch, UART TBE |
-| `disk.*` | `ata.c`, `ide.c`, `partition.s`, `filesystem.s` against a generated RDB + FAT16 image |
+| `disk.*` | `ata.c`, `ide.c`, `rdb.c`, `fat16.c` against a generated RDB + FAT16 image |
 
 Prefer this tier for anything that is pure logic. Use FS-UAE only for
 behaviour that needs real hardware. Nothing here proves the ROM boots.
@@ -240,7 +242,13 @@ from disk. Both are covered by the `disk.*` tests.
   works around it via `_end`; the table itself is still wrong.
 - `load_partition` reads the partition block from a hardcoded LBA 1 and
   ignores `RDB_PARTLIST`. `PART_NEXT` is printed but never followed, so only
-  the first partition is reachable.
+  the first partition is reachable. Carried over unchanged from the assembly
+  during the C conversion; fixing it needs a test image whose partition list
+  is not at block 1.
+- `math.s` is no longer called by anything. `mul32x16` and `divu32_10` existed
+  because the 68000 has no 32-bit multiply or divide; the C now gets both from
+  vbcc and `libsup.s`. It is 120 bytes of dead ROM kept alive only by the
+  `math.*` tests - delete both, or keep it deliberately.
 - The debugger's `g` does not restore A7 - it RTEs onto the debugger's own
   stack. `DBG_STACK` is defined, unused, and at an odd address.
 - A fresh clone cannot `make run`: nothing creates `harddrives/boot.hdf`.

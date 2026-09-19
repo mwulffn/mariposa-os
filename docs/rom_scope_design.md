@@ -230,8 +230,10 @@ self-contained, heavily tested, and the thing `rom2c` had already failed at.
    `serial_glue.s` for the register ABI.
 3. ~~`ide.s`~~ — done. `src/shared/ata.c` is the protocol, `src/rom/ide.c`
    is Gayle's register map and the device table, `ide_glue.s` is the ABI.
-4. `partition.s` and `filesystem.s`, shared, written against the block-device
-   interface rather than against Gayle.
+4. ~~`partition.s` and `filesystem.s`~~ — done. `src/shared/rdb.c` and
+   `src/shared/fat16.c` parse and return structs; `src/rom/disk.c` holds the
+   boot flow and every message. Neither shared file prints, which is the same
+   mechanism-versus-policy line as serial.
 5. `autoconfig.s` and `memory.s`.
 6. Split the debugger.
 

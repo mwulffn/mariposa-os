@@ -164,6 +164,16 @@ SPRINTF_BUFFER  equ $003400         ; Sprintf output buffer (256 bytes)
 KERNEL_CHIP     equ $004000         ; Kernel-managed chip RAM start
 KERNEL_LOAD_ADDR equ $200000        ; Where SYSTEM.BIN is loaded
 
+; Boot-time disk buffers. Chip RAM above the ROM's low reservations and below
+; the kernel's arena, used only while the ROM is loading SYSTEM.BIN. Named
+; here rather than in the C so the tests can reach them by symbol.
+RDB_BUFFER      equ $020000         ; RDB block, left in place for the tests
+PART_BUFFER     equ $021000         ; Partition block
+FS_BOOT_BUFFER  equ $022000         ; FAT16 boot sector
+FS_FAT_BUFFER   equ $022200         ; FAT sector cache
+FS_DIR_BUFFER   equ $022400         ; Root directory sector
+FS_VARS         equ $023000         ; struct fat16 - see src/shared/fat16.h
+
 ; ============================================================
 ; ROM identification
 ; ============================================================

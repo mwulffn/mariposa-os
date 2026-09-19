@@ -426,8 +426,7 @@ generic_exc_msg:
     include "sprintf_glue.s"
     include "debugger.s"
     include "ide_glue.s"
-    include "partition.s"
-    include "filesystem.s"
+    include "disk_glue.s"
 
 ; ============================================================
 ; ROM footer - pad to 256KB and add checksum location

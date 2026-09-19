@@ -25,7 +25,7 @@ ASM_INC  = $(filter-out $(ASM_MAIN),$(wildcard *.s))
 INCS     = $(wildcard *.i)
 
 # C sources, each compiled to assembly by vbcc then assembled to ELF.
-CSRC = sprintf.c serial.c ide.c
+CSRC = sprintf.c serial.c ide.c disk.c
 
 # vbcc calls __divu for the / and % in %d. That lives in the kernel's
 # libsup.s, which is position independent and already covered by the
@@ -34,7 +34,8 @@ LIBSUP_SRC = ../kernel/libsup.s
 
 # Shared with the kernel. serial_hw.c is the UART register layer; the
 # polling versus interrupt strategy is NOT shared - see serial_hw.h.
-SHARED_SRC = ../shared/serial_hw.c ../shared/ata.c
+SHARED_SRC = ../shared/serial_hw.c ../shared/ata.c \
+             ../shared/rdb.c ../shared/fat16.c
 SOBJ = $(addprefix $(BUILD)/,$(notdir $(SHARED_SRC:.c=.o)))
 
 OBJ = $(BUILD)/bootstrap.o $(CSRC:%.c=$(BUILD)/%.o) $(SOBJ) $(BUILD)/libsup.o
