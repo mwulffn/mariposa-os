@@ -82,6 +82,101 @@ Rather than reimplement it, the ROM links the kernel's `libsup.s` — already
 position independent, already covered by the `libsup.*` tests. This is the
 duplication argument working in the intended direction.
 
+## Space budget
+
+Measured from `build/kick.map`, not estimated:
+
+| | bytes |
+|---|---|
+| `bootstrap.o` — all ten `.s` files | 8428 |
+| `sprintf.o` — C | 896 |
+| `libsup.o` — shared with the kernel | 356 |
+| **total code** | **9680** |
+| **free** | **252,464 (96.3%)** |
+
+The `sprintf` conversion gives a real multiplier rather than a guess: 496
+bytes of assembly became 972 of C plus shim, so **~2x for hand-written
+assembly to vbcc C**. At that rate a fully C ROM lands near **16KB, 6% of the
+image**.
+
+Against that, what might plausibly be added:
+
+| | estimate |
+|---|---|
+| WD33C93 SCSI (A590/A2091/GVP) — selection, message and data phases | 4-8KB |
+| Block-device layer, probe and boot-order table | ~1KB |
+| 68000 disassembler for the debugger, table driven with mnemonics | 6-10KB |
+| 8x8 font and blitter console | ~3KB |
+| ROM service jump table | trivial |
+
+SCSI *and* IDE *and* a full debugger still lands around **35-40KB, ~15%**.
+Space is not the constraint and is not close to becoming one.
+
+### What is actually scarce
+
+1. **Low chip RAM, not ROM.** The map in `rom_design.md` reserves
+   `$00000-$03FFF` and leaves **~2.75KB** free at `$3500-$3FFF`, with the
+   debug bitplane already taking 10KB. Driver state and transfer buffers come
+   out of that. This is the budget that will bite first.
+2. **`bsr` is a 16-bit displacement, ±32KB.** Fine at 16KB. A ROM carrying
+   SCSI and a disassembler would cross it and inter-module `bsr` would start
+   failing - one of the things that bit `rom2c`. It is a link-time error now
+   rather than silent corruption, but it is a threshold to design for.
+3. **ROM shares the bus with chip RAM.** `rom_design.md` already says to
+   minimise runtime ROM access. Having room is not a reason to put runtime
+   services in ROM; the kernel should copy anything hot into fast RAM.
+
+Anything in ROM also cannot be updated without rebuilding the ROM. The test
+for what belongs there is narrow: **is it needed to reach the disk, or to
+debug a machine whose kernel is dead?** Everything else loads from disk.
+
+## Boot devices
+
+Eventually IDE, SCSI, and - kept open deliberately, not planned - CompactFlash
+in the A600/A1200 PCMCIA slot.
+
+### Not via expansion ROMs
+
+The Amiga's native answer is that the card carries its own driver, found
+through autoconfig's `er_InitDiagVec` - which `autoconfig.s` already walks
+past. Tempting, because it means never writing a per-controller driver.
+
+Rejected: those ROMs are written against AmigaOS's exec and expansion ABI.
+Running an A2091 or GVP boot ROM means implementing enough of AmigaOS for
+third-party code to call into, which is an enormous commitment to take on for
+a boot path in an OS that has its own ABI. Write our own drivers, in C,
+shared with the kernel.
+
+### Split the ATA layer from its transport
+
+This is the decision that has to be made before a second controller exists,
+and it costs almost nothing today.
+
+`ide.s` hardcodes Gayle's mapping: base `$DA0000`, task-file registers every
+four bytes from `+2`. A CompactFlash card in the PCMCIA slot is the same ATA
+device speaking the same commands, but its registers are somewhere else
+entirely - Gayle puts the PCMCIA I/O window at **`$A20000`**, with odd 8-bit
+registers split off to **`$A30000`**, attribute memory at `$A00000`, card
+control at `$DA8000` and card reset at `$A40000`.
+
+So the conversion of `ide.s` should produce two pieces:
+
+- **ATA protocol** - LBA28 PIO read, status and DRQ polling, command issue.
+  Identical across Gayle IDE, PCMCIA ATA and a CF adapter on the IDE port.
+- **Transport** - how a task-file register is reached and how a data word is
+  read. Gayle IDE and PCMCIA differ here and nowhere else.
+
+A base-and-stride pair, or a small accessor struct, is enough. Retrofitting
+this after `partition.s` and `filesystem.s` have been written against a
+Gayle-shaped API is the expensive version.
+
+PCMCIA would additionally need card-present detect, a reset, a CIS tuple walk
+in attribute memory (8-bit on a 16-bit bus, so every other byte), and writing
+the card configuration index - perhaps 1-2KB, and purely additive once the
+transport split exists. FS-UAE can emulate it (`pcmciaide`), so it is
+testable if it ever gets built; the headless harness would need a model of
+the `$A20000` window.
+
 ## The plan
 
 **Stays assembly, permanently** (~350 lines). Not because assembly is nicer,
@@ -113,11 +208,13 @@ self-contained, heavily tested, and the thing `rom2c` had already failed at.
 
 1. ~~`sprintf.s`~~ — done.
 2. `serial.s`, shared with the kernel's `serial.c`. The `format.put_*` tests
-   already cover it.
-3. `partition.s` and `filesystem.s`, shared. The `disk.*` tests cover them
-   against a generated RDB + FAT16 image, so this is the same bet as sprintf.
-4. `ide.s`, shared. Needs `volatile` register access; the kernel's serial
-   code already establishes the pattern.
+   already cover it, and it establishes the `volatile` register-access
+   pattern the drivers need.
+3. `ide.s`, shared — **before** the layers above it, so the ATA/transport
+   split lands while there is only one implementation to shape it around.
+   The `disk.*` tests cover it against a generated image.
+4. `partition.s` and `filesystem.s`, shared, written against the block-device
+   interface rather than against Gayle.
 5. `autoconfig.s` and `memory.s`.
 6. Split the debugger.
 
