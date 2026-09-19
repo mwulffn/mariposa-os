@@ -10,7 +10,7 @@ CC68  = vbccm68k
 LINK  = vlink
 
 AFLAGS = -Felf -m68000 -no-opt -I.
-CFLAGS = -cpu=68000 -O=1
+CFLAGS = -cpu=68000 -O=1 -I../shared
 LFLAGS = -b rawbin1 -T rom.ld
 
 BUILD = build
@@ -25,14 +25,19 @@ ASM_INC  = $(filter-out $(ASM_MAIN),$(wildcard *.s))
 INCS     = $(wildcard *.i)
 
 # C sources, each compiled to assembly by vbcc then assembled to ELF.
-CSRC = sprintf.c
+CSRC = sprintf.c serial.c
 
 # vbcc calls __divu for the / and % in %d. That lives in the kernel's
 # libsup.s, which is position independent and already covered by the
 # libsup.* tests - shared rather than reimplemented here.
 LIBSUP_SRC = ../kernel/libsup.s
 
-OBJ = $(BUILD)/bootstrap.o $(CSRC:%.c=$(BUILD)/%.o) $(BUILD)/libsup.o
+# Shared with the kernel. serial_hw.c is the UART register layer; the
+# polling versus interrupt strategy is NOT shared - see serial_hw.h.
+SHARED_SRC = ../shared/serial_hw.c
+SOBJ = $(addprefix $(BUILD)/,$(notdir $(SHARED_SRC:.c=.o)))
+
+OBJ = $(BUILD)/bootstrap.o $(CSRC:%.c=$(BUILD)/%.o) $(SOBJ) $(BUILD)/libsup.o
 
 .PHONY: all clean
 
@@ -48,6 +53,9 @@ $(BUILD)/libsup.o: $(LIBSUP_SRC) | $(BUILD)
 	$(ASM) $(AFLAGS) -o $@ $<
 
 $(BUILD)/%.asm: %.c | $(BUILD)
+	$(CC68) $(CFLAGS) -o=$@ $<
+
+$(BUILD)/%.asm: ../shared/%.c | $(BUILD)
 	$(CC68) $(CFLAGS) -o=$@ $<
 
 $(BUILD)/%.o: $(BUILD)/%.asm

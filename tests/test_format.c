@@ -495,7 +495,58 @@ static void t_sprintf_callable_directly(void)
     CHECK_U32(10, h_get_d(0));          /* returned length */
 }
 
+/* --- serial receive ------------------------------------------------------
+ *
+ * Not covered before the C conversion, which is exactly why they are here:
+ * polling for a byte and taking a byte are different access widths, and
+ * getting that wrong makes the poll itself eat the input. The harness models
+ * the distinction deliberately (see harness.h).
+ */
+
+static void t_get_char_when_empty(void)
+{
+    h_result r;
+    h_begin_call();
+    r = h_call(h_sym("serial_get_char"));
+    CHECK_CALL(r);
+    CHECK_U32(0, h_get_d(0) & 0xFF);
+}
+
+static void t_get_char_takes_one_byte(void)
+{
+    h_result r;
+
+    h_serial_input("Hi");
+
+    h_begin_call();
+    r = h_call(h_sym("serial_get_char"));
+    CHECK_CALL(r);
+    CHECK_U32('H', h_get_d(0) & 0xFF);
+
+    /* The second call must see the second byte, not the third. A poll that
+     * consumed would have skipped 'i' entirely. */
+    h_begin_call();
+    r = h_call(h_sym("serial_get_char"));
+    CHECK_CALL(r);
+    CHECK_U32('i', h_get_d(0) & 0xFF);
+}
+
+static void t_wait_char_returns_byte(void)
+{
+    h_result r;
+
+    h_serial_input("Z");
+
+    h_begin_call();
+    r = h_call(h_sym("serial_wait_char"));
+    CHECK_CALL(r);
+    CHECK_U32('Z', h_get_d(0) & 0xFF);
+}
+
 static const test_case tests[] = {
+    { "get_char_when_empty",     t_get_char_when_empty,     NULL },
+    { "get_char_takes_one_byte", t_get_char_takes_one_byte, NULL },
+    { "wait_char_returns_byte",  t_wait_char_returns_byte,  NULL },
     { "sprintf_direct",          t_sprintf_callable_directly, NULL },
     { "literal",                 t_literal,                 NULL },
     { "empty",                   t_empty,                   NULL },

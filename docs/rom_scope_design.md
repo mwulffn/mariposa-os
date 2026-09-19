@@ -207,9 +207,9 @@ every step. `sprintf` was chosen to go first precisely because it was
 self-contained, heavily tested, and the thing `rom2c` had already failed at.
 
 1. ~~`sprintf.s`~~ — done.
-2. `serial.s`, shared with the kernel's `serial.c`. The `format.put_*` tests
-   already cover it, and it establishes the `volatile` register-access
-   pattern the drivers need.
+2. ~~`serial.s`~~ — done. Split into `src/shared/serial_hw.c` (primitives,
+   shared) and `src/rom/serial.c` (polling, not shared), with
+   `serial_glue.s` for the register ABI.
 3. `ide.s`, shared — **before** the layers above it, so the ATA/transport
    split lands while there is only one implementation to shape it around.
    The `disk.*` tests cover it against a generated image.

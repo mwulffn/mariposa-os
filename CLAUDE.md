@@ -74,7 +74,8 @@ src/rom/                      - 256KB ROM, pure 68000 assembly
   math.s                      - 32-bit multiply and divide-by-10 (68000 has neither)
   autoconfig.s                - Zorro II expansion autoconfig
   memory.s                    - Memory detection, map table, map printing
-  serial.s                    - Serial port I/O (polled)
+  serial.c                    - Serial port I/O (polled, see serial_glue.s)
+  serial_glue.s               - Register ABI shim between callers and serial.c
   sprintf.c                   - Formatted output (see docs/rom/sprintf_api.md)
   sprintf_glue.s              - Stack ABI shim between callers and sprintf.c
   rom.ld                      - Linker script, 256KB image at $FC0000
@@ -85,6 +86,9 @@ src/rom/                      - 256KB ROM, pure 68000 assembly
   hardware.i                  - Hardware definitions and the low-memory map
   build/kick.rom              - Compiled ROM (256KB)
   build/kick.sym              - Symbol table for the tests, from the vlink map
+src/shared/                   - Compiled into BOTH the ROM and the kernel
+  amiga_hw.h                  - Custom chip registers and bit definitions
+  serial_hw.{c,h}             - Paula UART primitives; no waiting strategy
 src/kernel/
   crt0.s                      - Startup stub, receives control from the ROM
   libsup.s                    - 32-bit divide/modulo helpers vbcc calls
@@ -114,7 +118,7 @@ test_*.py                     - FS-UAE integration scripts
 ## Testing
 
 ```bash
-make test                      # headless, 141 tests, ~0.3s, no emulator needed
+make test                      # headless, 144 tests, ~0.3s, no emulator needed
 make test FILTER=rom.panic     # narrow to one group while iterating
 ```
 

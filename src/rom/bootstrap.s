@@ -422,7 +422,7 @@ generic_exc_msg:
     include "panic.s"
     include "autoconfig.s"
     include "memory.s"
-    include "serial.s"
+    include "serial_glue.s"
     include "sprintf_glue.s"
     include "debugger.s"
     include "ide.s"
