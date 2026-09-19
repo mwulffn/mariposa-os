@@ -143,6 +143,29 @@ static void raw_write(uint8_t *p, int size, uint32_t v)
 
 /* ------------------------------------------------------- hardware registers */
 
+/*
+ * Zorro II expansion space above the fast RAM the model provides.
+ *
+ * An unpopulated Zorro bus floats high. That is not a detail: detect_fast_ram
+ * sizes memory by writing one megabyte past the end and failing the
+ * read-back, so without a floating bus the probe hits unmapped memory, the
+ * harness calls it a fault, and the routine cannot be tested at all - which
+ * is exactly where it stood before this existed.
+ */
+#define H_ZORRO_END 0x00A00000u
+
+static int floating_bus(uint32_t addr)
+{
+    return addr >= H_FAST_BASE + H_FAST_SIZE && addr < H_ZORRO_END;
+}
+
+static uint32_t floating_value(int size)
+{
+    if (size == 1) return 0xFFu;
+    if (size == 2) return 0xFFFFu;
+    return 0xFFFFFFFFu;
+}
+
 /* Regions we model well enough not to hang, but do not implement. Reads
  * return a value that means "nothing here"; writes are discarded. */
 static int stub_region(uint32_t addr, uint32_t *read_value)
@@ -504,6 +527,8 @@ static uint32_t cpu_read(uint32_t addr, int size)
         return ide_read(addr, size);
     if (stub_region(addr, &stub))
         return stub;
+    if (floating_bus(addr))
+        return floating_value(size);
     if ((p = raw_ptr(addr, NULL)) != NULL)
         return raw_read(p, size);
 
@@ -535,6 +560,8 @@ static void cpu_write(uint32_t addr, int size, uint32_t val)
     }
     if (stub_region(addr, &stub))
         return;
+    if (floating_bus(addr))
+        return;                            /* nothing there to take it */
     if ((p = raw_ptr(addr, &writable)) != NULL) {
         if (!writable) {
             fault("write to ROM at $%06X (pc $%06X)",

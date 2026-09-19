@@ -34,6 +34,12 @@
 /* Guest stack top. Grows down, well clear of the scratch area. */
 #define H_STACK_TOP    0x2F0000u
 
+/* Zorro II expansion space above H_FAST. An unpopulated bus floats high:
+ * reads return all ones, writes go nowhere. detect_fast_ram sizes memory by
+ * probing past the end and failing the read-back, so this is what stops it
+ * without the probe looking like a fault. */
+#define H_ZORRO_END    0x00A00000u
+
 /* Sentinels. Never mapped: the run loop checks PC before each instruction,
  * so these are recognised without ever being fetched from. */
 #define H_RETURN_ADDR  0x00F00000u       /* a routine returning here is done */
