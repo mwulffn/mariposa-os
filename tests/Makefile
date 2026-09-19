@@ -24,11 +24,17 @@ CC ?= cc
 
 # Our code is linted hard. Musashi is third party and is not.
 CFLAGS_TEST    = -std=c99 -O1 -g -Wall -Wextra -I. -I$(BUILD) -I$(MUSASHI_DIR)
-CFLAGS_MUSASHI = -O2 -g -w -I$(MUSASHI_DIR)
+# M68K_EMULATE_INT_ACK: without it Musashi clears the IRQ line the moment it
+# services an interrupt, which makes the line edge-triggered. The Amiga's is
+# level-triggered - an interrupt stays asserted until the handler clears its
+# INTREQ bit - so the harness supplies an autovector int-ack callback instead.
+# Set here rather than by editing m68kconf.h, which lives in the fetched (and
+# gitignored) Musashi tree and guards the default with #ifndef for this.
+CFLAGS_MUSASHI = -O2 -g -w -I$(MUSASHI_DIR) -DM68K_EMULATE_INT_ACK=1
 LDLIBS         = -lm
 
 TEST_SRC = main.c protocol.c harness.c test_math.c test_format.c \
-           test_vectors.c test_disk.c test_libsup.c
+           test_vectors.c test_irq.c test_disk.c test_libsup.c
 TEST_OBJ = $(TEST_SRC:%.c=$(BUILD)/%.o)
 
 MUSASHI_OBJ = $(BUILD)/m68kcpu.o $(BUILD)/m68kdasm.o $(BUILD)/m68kops.o \
@@ -65,6 +71,11 @@ $(BUILD)/test_disk.o: $(DISK_STAMP)
 $(LIBSUP_SYM): $(LIBSUP_SRC) mksym.py | $(BUILD)
 	$(ASM) -Fbin -m68000 -no-opt -o $(LIBSUP_BIN) -L $(BUILD)/libsup.lst $(LIBSUP_SRC)
 	@python3 mksym.py $(BUILD)/libsup.lst $(LIBSUP_SYM)
+
+# Objects depend on this Makefile so a CFLAGS change actually rebuilds them.
+# Without it, flipping -DM68K_EMULATE_INT_ACK left stale Musashi objects in
+# place and the flag silently did nothing.
+$(TEST_OBJ) $(MUSASHI_OBJ): Makefile
 
 $(BUILD)/%.o: %.c $(MUSASHI_STAMP) | $(BUILD)
 	$(CC) $(CFLAGS_TEST) -c -o $@ $<

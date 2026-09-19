@@ -94,6 +94,7 @@ tests/                        - Headless 68000 test harness (see docs/testing.md
   test_libsup.c               - src/kernel/libsup.s
   test_format.c               - sprintf.s and the serial formatting helpers
   test_vectors.c              - ROM header, vector table, panic frame decoding
+  test_irq.c                  - Paula interrupt registers, autovector dispatch
   test_disk.c                 - ide.s, partition.s, filesystem.s
   mksym.py                    - vasm listing -> flat symbol table
   mkdisk.py                   - Generates the RDB + FAT16 test disk images
@@ -107,7 +108,7 @@ test_*.py                     - FS-UAE integration scripts
 ## Testing
 
 ```bash
-make test                      # headless, 127 tests, ~0.3s, no emulator needed
+make test                      # headless, 140 tests, ~0.3s, no emulator needed
 make test FILTER=rom.panic     # narrow to one group while iterating
 ```
 
@@ -121,6 +122,7 @@ code is the verdict: 0 pass, 1 test failed, 2 harness error.
 | `libsup.*` | `src/kernel/libsup.s`, assembled standalone - no C compiler needed |
 | `format.*` | `sprintf.s`, `serial_put_*`, `parse_hex` |
 | `rom.*` | ROM header, exception vector table, panic frame decoding |
+| `irq.*` | INTENA/INTREQ, interrupt levels, 68000 autovector dispatch |
 | `disk.*` | `ide.s`, `partition.s`, `filesystem.s` against a generated RDB + FAT16 image |
 
 Prefer this tier for anything that is pure logic. Use FS-UAE only for
@@ -201,7 +203,9 @@ from disk. Both are covered by the `disk.*` tests.
   including the master bit and never writes it again, and sets SR to $2700
   immediately before jumping to the kernel, which never lowers it. `cpu.s`
   from `docs/interrupt_control_design.md` is unwritten. Everything below
-  waits on this.
+  waits on this. The harness is ready for it: the `irq.*` suite models
+  INTENA/INTREQ and dispatches autovectors on the real 68000 core, so this
+  can be built test-first rather than against an emulator.
 - Keyboard input (CIA-A), level 2 PORTS interrupt. Needs the handshake pulse.
 - Real memory allocator: free list with coalescing, per `docs/mem_design.md`.
   `mem.c` is a bump allocator with no free.

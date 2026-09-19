@@ -124,6 +124,11 @@ recorded as a fault and fails the test, rather than silently reading zero.
   no image attached the status register reads `$7F`, which `ide.s` treats as
   "no drive", so tests that do not care about disks are unaffected and none
   of them hang.
+- **Paula's interrupt registers**: `INTENA`/`INTREQ` with their SET/CLR bit-15
+  encoding, reading back through `INTENAR`/`INTREQR`, the master enable, and
+  the bit-to-level mapping. The level is recomputed on every write and driven
+  onto the CPU's IPL lines, so autovector dispatch happens on the real 68000
+  core, through a real vector table in chip RAM.
 - **Stubs** that exist only to stop routines hanging: CIA-A/B and Zorro
   autoconfig space (reports no card).
 
@@ -131,6 +136,30 @@ One deliberate deviation from hardware: the model clears RBF when the guest
 reads `SERDATR` as a word, whereas Paula needs an `INTREQ` write to ack.
 Without it `serial_get_char`, which never acks, would spin forever. A test of
 the ack path itself has to check `INTREQ` directly.
+
+### The interrupt tier
+
+The IRQ line is **level triggered**, as on hardware: an interrupt stays
+asserted until the handler clears its `INTREQ` bit, so a handler that forgets
+to ack is re-entered the instant it `RTE`s. That needs
+`-DM68K_EMULATE_INT_ACK=1` on the Musashi build (see `tests/Makefile`) plus an
+int-ack callback returning `M68K_INT_ACK_AUTOVECTOR` — without the flag
+Musashi clears the line itself when it services the interrupt, which would
+quietly hide exactly that bug. `irq.unacked_reenters` is the test that pins
+this down.
+
+Tests drive it with `h_write_intena()` / `h_raise()` and read the level back
+with `h_irq_level()`. Interrupts only reach the CPU once the SR mask is
+lowered — `h_reset()` leaves SR at `$2700`, which is the state ROM code runs
+in, so a test that wants delivery calls `h_set_sr(0x2000)` first.
+
+Handlers are hand-assembled byte by byte in `test_irq.c` and loaded with
+`h_alloc()`, which keeps the suite free of a second assembler step.
+
+`irq.rom_autovector_panics` closes the loop against the real ROM: after
+`install_exception_vectors`, a VERTB reaches `auto_vec_handler` and panics
+with `AUTOVECTOR INTERRUPT`. Before `2210e79` it reported `UNKNOWN EXCEPTION`,
+because the generic fill had eaten the autovectors.
 
 ### Testing code outside the ROM
 
@@ -183,7 +212,7 @@ catch.
 ## What the suite found
 
 Everything it turned up has been fixed, and the tests that found each bug now
-guard the fix. The suite is 127 tests, no xfails.
+guard the fix. The suite is 140 tests, no xfails.
 
 The storage path was in good shape from the start: `ide.s`, `find_rdb`, the
 FAT16 boot-sector parse, the directory scan, the chain walk and

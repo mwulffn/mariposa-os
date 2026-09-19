@@ -158,6 +158,84 @@ void        h_serial_clear(void);
  */
 void h_serial_input(const char *s);
 
+/* --- interrupts ----------------------------------------------------------
+ *
+ * Paula's interrupt registers and the 68000 IPL lines, modelled properly
+ * enough to test autovector dispatch on a real 68000 core.
+ *
+ * INTENA ($DFF09A) and INTREQ ($DFF09C) are write-only SET/CLR registers:
+ * bit 15 set means "set the bits I name", bit 15 clear means "clear them".
+ * They read back through INTENAR ($DFF01C) and INTREQR ($DFF01E). Bit 14 of
+ * INTENA is the master enable; nothing reaches the CPU without it.
+ *
+ * The level presented to the CPU is recomputed on every write to either
+ * register, which gives real Amiga semantics for free: an interrupt stays
+ * asserted until the handler clears its INTREQ bit, so a handler that
+ * forgets to ack will be re-entered the instant it RTEs. That is a bug worth
+ * catching, so the model does not paper over it.
+ *
+ * Level 7 is the NMI line and does not come from Paula. h_irq_force() drives
+ * the IPL lines directly for tests that need it.
+ */
+
+/* INTENA/INTREQ bit numbers, and the level each one raises. */
+#define H_INTB_TBE      0       /* level 1 - serial transmit buffer empty */
+#define H_INTB_DSKBLK   1       /* level 1 */
+#define H_INTB_SOFTINT  2       /* level 1 */
+#define H_INTB_PORTS    3       /* level 2 - CIA-A, the keyboard lives here */
+#define H_INTB_COPER    4       /* level 3 */
+#define H_INTB_VERTB    5       /* level 3 - vertical blank */
+#define H_INTB_BLIT     6       /* level 3 */
+#define H_INTB_AUD0     7       /* level 4 */
+#define H_INTB_AUD1     8       /* level 4 */
+#define H_INTB_AUD2     9       /* level 4 */
+#define H_INTB_AUD3     10      /* level 4 */
+#define H_INTB_RBF      11      /* level 5 - serial receive buffer full */
+#define H_INTB_DSKSYN   12      /* level 5 */
+#define H_INTB_EXTER    13      /* level 6 - CIA-B */
+#define H_INTB_INTEN    14      /* master enable, in INTENA only */
+#define H_INTB_SETCLR   15      /* write direction */
+
+#define H_INTF(b)       ((uint16_t)(1u << (b)))
+
+#define H_INTF_TBE      H_INTF(H_INTB_TBE)
+#define H_INTF_PORTS    H_INTF(H_INTB_PORTS)
+#define H_INTF_VERTB    H_INTF(H_INTB_VERTB)
+#define H_INTF_RBF      H_INTF(H_INTB_RBF)
+#define H_INTF_EXTER    H_INTF(H_INTB_EXTER)
+#define H_INTF_INTEN    H_INTF(H_INTB_INTEN)
+#define H_INTF_SETCLR   H_INTF(H_INTB_SETCLR)
+
+/* Current register contents, as INTENAR/INTREQR would read them. */
+uint16_t h_intena(void);
+uint16_t h_intreq(void);
+
+/* Write INTENA/INTREQ from the host side, with the same SET/CLR encoding the
+ * guest uses - so h_write_intena(H_INTF_SETCLR | H_INTF_INTEN | H_INTF_VERTB)
+ * enables the master bit and VERTB together. */
+void h_write_intena(uint16_t val);
+void h_write_intreq(uint16_t val);
+
+/* Assert an interrupt source, the way Paula would. Shorthand for
+ * h_write_intreq(H_INTF_SETCLR | bits). */
+void h_raise(uint16_t bits);
+
+/* The level currently presented to the CPU: 0 when nothing is pending,
+ * masked, or the master enable is off. */
+int h_irq_level(void);
+
+/* Drive the IPL lines directly, bypassing Paula. For level 7, and for tests
+ * that want a level without inventing a source for it. Cleared by h_reset
+ * and overridden by the next INTENA/INTREQ write. */
+void h_irq_force(int level);
+
+/* The 68000 status register. The interrupt mask is bits 8-10: h_reset leaves
+ * SR at $2700 (all interrupts masked, as ROM code runs), so a test that wants
+ * an interrupt delivered has to lower it - h_set_sr(0x2000) is the usual
+ * choice. */
+void     h_set_sr(uint16_t sr);
+uint16_t h_get_sr(void);
+
 /* --- IDE disk ------------------------------------------------------------
  *
  * A Gayle-mapped ATA register model over a raw image file, enough for the

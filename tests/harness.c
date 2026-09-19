@@ -108,6 +108,101 @@ static int stub_region(uint32_t addr, uint32_t *read_value)
     return 0;
 }
 
+/* ------------------------------------------------------- Paula interrupts */
+
+#define REG_INTENAR 0x01Cu
+#define REG_INTREQR 0x01Eu
+#define REG_INTENA  0x09Au
+#define REG_INTREQ  0x09Cu
+
+static uint16_t g_intena;
+static uint16_t g_intreq;
+static int      g_irq_forced;      /* -1 = not forced */
+
+/* Which CPU level each INTREQ bit raises. Index is the bit number; entries
+ * past EXTER are unused. Level 7 is the NMI line and is not in here - it does
+ * not come from Paula. */
+static const int g_int_level[14] = {
+    1, 1, 1,        /* TBE, DSKBLK, SOFTINT */
+    2,              /* PORTS */
+    3, 3, 3,        /* COPER, VERTB, BLIT */
+    4, 4, 4, 4,     /* AUD0-3 */
+    5, 5,           /* RBF, DSKSYN */
+    6               /* EXTER */
+};
+
+/* Highest level with a bit both requested and enabled. Zero unless the master
+ * enable is on, which is what makes `move.w #$7FFF,INTENA` at reset stick. */
+static int irq_level_from_paula(void)
+{
+    uint16_t active;
+    int b, level = 0;
+
+    if (!(g_intena & H_INTF_INTEN))
+        return 0;
+
+    active = (uint16_t)(g_intreq & g_intena & 0x3FFFu);
+    for (b = 0; b < 14; b++)
+        if ((active & (1u << b)) && g_int_level[b] > level)
+            level = g_int_level[b];
+    return level;
+}
+
+/* Recompute and present the level. Called on every write to either register,
+ * so an interrupt the handler has not acked stays asserted and re-fires on
+ * RTE, exactly as on hardware. */
+static void irq_update(void)
+{
+    int level = g_irq_forced >= 0 ? g_irq_forced : irq_level_from_paula();
+    m68k_set_irq((unsigned int)level);
+}
+
+/* The Amiga is fully autovectored: no device puts a vector on the bus. The
+ * callback exists only so Musashi leaves the IRQ line alone afterwards. */
+static int int_ack(int level)
+{
+    (void)level;
+    return M68K_INT_ACK_AUTOVECTOR;
+}
+
+static uint16_t setclr(uint16_t cur, uint16_t val)
+{
+    if (val & H_INTF_SETCLR)
+        return (uint16_t)(cur | (val & 0x7FFFu));
+    return (uint16_t)(cur & ~(val & 0x7FFFu));
+}
+
+uint16_t h_intena(void) { return g_intena; }
+uint16_t h_intreq(void) { return g_intreq; }
+
+void h_write_intena(uint16_t val)
+{
+    g_intena = setclr(g_intena, val);
+    irq_update();
+}
+
+void h_write_intreq(uint16_t val)
+{
+    g_intreq = setclr(g_intreq, val);
+    irq_update();
+}
+
+void h_raise(uint16_t bits) { h_write_intreq((uint16_t)(H_INTF_SETCLR | bits)); }
+
+int h_irq_level(void)
+{
+    return g_irq_forced >= 0 ? g_irq_forced : irq_level_from_paula();
+}
+
+void h_irq_force(int level)
+{
+    g_irq_forced = (level > 0) ? level : -1;
+    irq_update();
+}
+
+void     h_set_sr(uint16_t sr) { m68k_set_reg(M68K_REG_SR, sr); }
+uint16_t h_get_sr(void) { return (uint16_t)m68k_get_reg(NULL, M68K_REG_SR); }
+
 /* ------------------------------------------------------------- Gayle IDE */
 
 #define IDE_BASE     0xDA0000u
@@ -308,8 +403,11 @@ static uint32_t custom_read(uint32_t addr, int size)
     if (off == REG_SERDATR && size == 1) return serdatr_value() >> 8;
     if (off == REG_SERDATR + 1 && size == 1) return serdatr_value() & 0xFF;
 
-    /* Everything else in custom space reads as zero. DMACONR/INTENAR/VPOSR
-     * would go here if a test needed them. */
+    if (off == REG_INTENAR) return g_intena;
+    if (off == REG_INTREQR) return g_intreq;
+
+    /* Everything else in custom space reads as zero. DMACONR and VPOSR would
+     * go here if a test needed them. */
     return 0;
 }
 
@@ -323,8 +421,11 @@ static void custom_write(uint32_t addr, int size, uint32_t val)
             g_tx[g_tx_len++] = (char)(val & 0xFF);
         return;
     }
-    /* SERPER, COLOR00, DMACON, INTENA, bitplane and copper registers: the
-     * routines under test write these freely and nothing reads them back. */
+    if (off == REG_INTENA) { h_write_intena((uint16_t)val); return; }
+    if (off == REG_INTREQ) { h_write_intreq((uint16_t)val); return; }
+
+    /* SERPER, COLOR00, DMACON, bitplane and copper registers: the routines
+     * under test write these freely and nothing reads them back. */
 }
 
 /* ------------------------------------------------------- Musashi callbacks */
@@ -594,7 +695,8 @@ uint32_t h_get_sp(void)       { return m68k_get_reg(NULL, M68K_REG_SP); }
 
 /* ------------------------------------------------------------- run control */
 
-static uint64_t g_budget = 20000000;
+#define H_DEFAULT_BUDGET 20000000u
+static uint64_t g_budget = H_DEFAULT_BUDGET;
 
 void h_set_cycle_budget(uint64_t c) { g_budget = c; }
 
@@ -706,6 +808,9 @@ void h_reset(void)
 
     g_tx_len = 0;
     g_rx_len = g_rx_pos = 0;
+    g_intena = g_intreq = 0;
+    g_irq_forced = -1;
+    g_budget = H_DEFAULT_BUDGET;   /* a test that lowered it must not leak it */
     g_fault_count = 0;
     g_fault_detail[0] = '\0';
     g_scratch_next = H_SCRATCH_BASE;
@@ -719,7 +824,9 @@ void h_reset(void)
 
     m68k_init();
     m68k_set_cpu_type(M68K_CPU_TYPE_68000);
+    m68k_set_int_ack_callback(int_ack);
     m68k_pulse_reset();
+    m68k_set_irq(0);
 
     /* Point every exception vector at its own sentinel, so an exception is
      * identified by where PC lands - no frame decoding needed. A test that
