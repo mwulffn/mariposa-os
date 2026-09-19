@@ -251,6 +251,23 @@ void h_irq_force(int level);
 void     h_set_sr(uint16_t sr);
 uint16_t h_get_sr(void);
 
+/* --- Zorro II autoconfig -------------------------------------------------
+ *
+ * One card slot. With nothing attached the space reads $FF, which is the
+ * "no card" answer, so tests that do not care are unaffected.
+ *
+ * er_Type bits 7-6 must be %11 for a Zorro II card and bits 2-0 carry the
+ * size code; er_Flags bit 7 marks a memory board. The card stops answering
+ * once it is relocated or shut up, exactly as on the bus.
+ */
+void     h_attach_zorro(uint8_t er_type, uint8_t er_flags);
+void     h_detach_zorro(void);
+
+/* The address the card was told to move to, or 0 if it never was. */
+uint32_t h_zorro_base(void);
+int      h_zorro_configured(void);
+int      h_zorro_shut_up(void);
+
 /* --- IDE disk ------------------------------------------------------------
  *
  * A Gayle-mapped ATA register model over a raw image file, enough for the

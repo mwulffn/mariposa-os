@@ -15,6 +15,7 @@ extern const test_suite format_suite;
 extern const test_suite vector_suite;
 extern const test_suite irq_suite;
 extern const test_suite memory_suite;
+extern const test_suite zorro_suite;
 extern const test_suite disk_suite;
 extern const test_suite libsup_suite;
 
@@ -64,7 +65,8 @@ int main(int argc, char **argv)
     {
         const test_suite suites[] = { libsup_suite, format_suite,
                                       vector_suite, irq_suite,
-                                      memory_suite, disk_suite };
+                                      memory_suite, zorro_suite,
+                                      disk_suite };
         rc = run_suites(suites, sizeof suites / sizeof suites[0], filter);
     }
 

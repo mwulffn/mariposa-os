@@ -154,9 +154,23 @@ static void raw_write(uint8_t *p, int size, uint32_t v)
  */
 #define H_ZORRO_END 0x00A00000u
 
+#define ZORRO_BASE   0xE80000u
+#define ZORRO_END    0xE90000u
+
 static int floating_bus(uint32_t addr)
 {
-    return addr >= H_FAST_BASE + H_FAST_SIZE && addr < H_ZORRO_END;
+    if (addr >= H_FAST_BASE + H_FAST_SIZE && addr < H_ZORRO_END)
+        return 1;
+
+    /* Expansion space above the one autoconfig slot at $E80000. Zorro II
+     * config space is only $E80000-$E8FFFF and every card answers there in
+     * turn, but configure_zorro_ii walks a2 up by $10000 per card and so
+     * reads $E90000 after the first. On hardware that floats and ends the
+     * scan; here it would otherwise look like a fault. */
+    if (addr >= ZORRO_END && addr < 0xF00000u)
+        return 1;
+
+    return 0;
 }
 
 static uint32_t floating_value(int size)
@@ -166,15 +180,98 @@ static uint32_t floating_value(int size)
     return 0xFFFFFFFFu;
 }
 
+/* ------------------------------------------------- Zorro II autoconfig ---
+ *
+ * One card slot, enough to drive configure_zorro_ii through its memory and
+ * I/O paths. Without it the space reads $FF everywhere, which is the "no
+ * card" answer and the only case that could be tested.
+ *
+ * Nibble packed, as the bus is: logical byte register n appears at offset
+ * n*4 with its high nibble in bits 15-12, and at n*4+2 with its low nibble
+ * in the same place. Register 0 (er_Type) reads straight; every other
+ * register is presented inverted, which is why the ROM un-inverts them.
+ *
+ * Writing the low half of the base address at $48 is the trigger: the card
+ * relocates and stops answering here, so a rescan sees an empty slot. The
+ * shut-up register at $4C does the same without a relocation.
+ */
+#define ZORRO_REGS   64
+
+static int      g_zorro_present;
+static uint8_t  g_zorro_reg[ZORRO_REGS];
+static int      g_zorro_done;        /* relocated or shut up */
+static uint32_t g_zorro_base_written;
+static int      g_zorro_shutup;
+
+static uint32_t zorro_read(uint32_t addr)
+{
+    uint32_t off = addr - ZORRO_BASE;
+    unsigned reg = off / 4;
+    uint8_t  v;
+
+    if (!g_zorro_present || g_zorro_done || reg >= ZORRO_REGS)
+        return 0xFFFFu;
+
+    v = g_zorro_reg[reg];
+    if (reg != 0)
+        v = (uint8_t)~v;                 /* everything but er_Type inverts */
+
+    return (uint32_t)(((off & 2) ? (v & 0x0F) : (v >> 4)) & 0x0F) << 12;
+}
+
+static void zorro_write(uint32_t addr, uint32_t val)
+{
+    uint32_t off = addr - ZORRO_BASE;
+
+    if (!g_zorro_present || g_zorro_done)
+        return;
+
+    /* Base address nibbles land in the high half of a byte write. */
+    switch (off) {
+    case 0x44: g_zorro_base_written =
+                   (g_zorro_base_written & 0x0FFFFFFFu) | ((val & 0xF0u) << 24);
+               break;
+    case 0x46: g_zorro_base_written =
+                   (g_zorro_base_written & 0xF0FFFFFFu) | ((val & 0xF0u) << 20);
+               break;
+    case 0x4A: g_zorro_base_written =
+                   (g_zorro_base_written & 0xFFF0FFFFu) | ((val & 0xF0u) << 12);
+               break;
+    case 0x48: g_zorro_base_written =
+                   (g_zorro_base_written & 0xFF0FFFFFu) | ((val & 0xF0u) << 16);
+               g_zorro_done = 1;         /* this write is the trigger */
+               break;
+    case 0x4C: g_zorro_shutup = 1;
+               g_zorro_done   = 1;
+               break;
+    default:   break;
+    }
+}
+
+void h_attach_zorro(uint8_t er_type, uint8_t er_flags)
+{
+    int i;
+    for (i = 0; i < ZORRO_REGS; i++)
+        g_zorro_reg[i] = 0;
+    g_zorro_reg[0] = er_type;            /* er_Type  */
+    g_zorro_reg[2] = er_flags;           /* er_Flags */
+    g_zorro_present = 1;
+    g_zorro_done = 0;
+    g_zorro_shutup = 0;
+    g_zorro_base_written = 0;
+}
+
+void     h_detach_zorro(void)   { g_zorro_present = 0; }
+uint32_t h_zorro_base(void)     { return g_zorro_base_written; }
+int      h_zorro_configured(void) { return g_zorro_done && !g_zorro_shutup; }
+int      h_zorro_shut_up(void)  { return g_zorro_shutup; }
+
 /* Regions we model well enough not to hang, but do not implement. Reads
  * return a value that means "nothing here"; writes are discarded. */
 static int stub_region(uint32_t addr, uint32_t *read_value)
 {
     /* CIA-A and CIA-B. Reset code writes control and interrupt registers. */
     if (addr >= 0xBFD000u && addr <= 0xBFEF01u) { *read_value = 0x00; return 1; }
-
-    /* Zorro II autoconfig space: $FF from register 0 means "no card". */
-    if (addr >= 0xE80000u && addr < 0xE90000u) { *read_value = 0xFF; return 1; }
 
     return 0;
 }
@@ -525,6 +622,8 @@ static uint32_t cpu_read(uint32_t addr, int size)
         return custom_read(addr, size);
     if (addr >= IDE_BASE && addr < IDE_END)
         return ide_read(addr, size);
+    if (addr >= ZORRO_BASE && addr < ZORRO_END)
+        return zorro_read(addr);
     if (stub_region(addr, &stub))
         return stub;
     if (floating_bus(addr))
@@ -556,6 +655,10 @@ static void cpu_write(uint32_t addr, int size, uint32_t val)
     }
     if (addr >= IDE_BASE && addr < IDE_END) {
         ide_write(addr, size, val);
+        return;
+    }
+    if (addr >= ZORRO_BASE && addr < ZORRO_END) {
+        zorro_write(addr, val);
         return;
     }
     if (stub_region(addr, &stub))
@@ -900,6 +1003,9 @@ void h_reset(void)
     g_rx_len = g_rx_pos = 0;
     g_intena = g_intreq = 0;
     g_irq_forced = -1;
+    g_zorro_present = 0;
+    g_zorro_done = g_zorro_shutup = 0;
+    g_zorro_base_written = 0;
     g_cycles = 0;
     g_tbe_at = g_tsre_at = 0;
     g_tbe_signalled = 1;       /* idle transmitter, nothing sent yet */
