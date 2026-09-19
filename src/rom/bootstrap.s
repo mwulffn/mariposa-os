@@ -111,6 +111,13 @@ start:
     bne     .enter_debugger         ; Go to debugger if error
     ; On success: D1 = file size, kernel loaded at $200000
 
+    ; The memory table was built before the kernel existed, so its fast RAM
+    ; entry starts at $200000 and covers the image we just loaded there.
+    ; Carve the image out now that the size is known, or the kernel is handed
+    ; its own code as free memory.
+    move.l  d1,d0
+    bsr     reserve_kernel_image
+
     ; ============================================================
     ; 9. JUMP TO KERNEL
     ; ============================================================
@@ -420,7 +427,7 @@ generic_exc_msg:
 ; ============================================================
     include "panic.s"
     include "autoconfig.s"
-    include "memory.s"
+    include "memory_glue.s"
     include "serial_glue.s"
     include "sprintf_glue.s"
     include "debugger.s"

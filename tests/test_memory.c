@@ -22,6 +22,7 @@
 
 #define KERNEL_CHIP     0x4000u
 #define KERNEL_STACK    0x2000u         /* 8KB reserved at the top of fast */
+#define MEMMAP_MAX_SCAN 36
 
 static uint32_t entry(int n)
 {
@@ -124,6 +125,80 @@ static void t_table_regions_do_not_overlap(void)
     }
 }
 
+/* --- reserving the kernel image ------------------------------------------
+ *
+ * The table is built before SYSTEM.BIN is read, so its fast RAM entry starts
+ * at $200000 and covers whatever gets loaded there. Until this ran, the
+ * kernel was handed its own image as free memory and mem.c had to clamp to
+ * its _end symbol to avoid allocating over itself.
+ */
+
+#define KERNEL_LOAD_ADDR H_FAST_BASE
+
+static void reserve(uint32_t bytes)
+{
+    h_result r;
+    h_begin_call();
+    h_set_d(0, bytes);
+    r = h_call(h_sym("reserve_kernel_image"));
+    CHECK_CALL(r);
+    CHECK_U32(0u, h_get_d(0));
+}
+
+static void t_reserve_splits_fast(void)
+{
+    /* 5000 bytes rounds up to 8192. */
+    build();
+    reserve(5000);
+
+    check_entry(2, KERNEL_LOAD_ADDR, 0x2000u, MEM_TYPE_RESERVED);
+    check_entry(3, KERNEL_LOAD_ADDR + 0x2000u,
+                H_FAST_SIZE - KERNEL_STACK - 0x2000u, MEM_TYPE_FAST);
+}
+
+static void t_reserve_keeps_stack_and_rom(void)
+{
+    /* The entries after the split must survive the shift intact. */
+    build();
+    reserve(5000);
+
+    check_entry(4, H_FAST_BASE + H_FAST_SIZE - KERNEL_STACK,
+                KERNEL_STACK, MEM_TYPE_RESERVED);
+    check_entry(5, H_ROM_BASE, H_ROM_SIZE, MEM_TYPE_ROM);
+    check_entry(6, 0, 0, 0);
+}
+
+static void t_reserve_rounds_up(void)
+{
+    build();
+    reserve(1);
+    check_entry(2, KERNEL_LOAD_ADDR, 0x1000u, MEM_TYPE_RESERVED);
+}
+
+static void t_reserve_no_free_fast_overlaps_kernel(void)
+{
+    /* The property that actually matters: after reserving, no entry marked
+     * FAST contains the kernel load address. */
+    int n;
+
+    build();
+    reserve(5000);
+
+    for (n = 0; n < MEMMAP_MAX_SCAN && !t_failed(); n++) {
+        uint32_t base = h_peek32(entry(n) + 0);
+        uint32_t size = h_peek32(entry(n) + 4);
+        uint32_t type = h_peek16(entry(n) + 8);
+
+        if (size == 0)
+            break;
+        if (type != MEM_TYPE_FAST)
+            continue;
+        CHECK(KERNEL_LOAD_ADDR < base || KERNEL_LOAD_ADDR >= base + size,
+              "free fast entry %d ($%X+$%X) still contains the kernel image",
+              n, base, size);
+    }
+}
+
 /* ------------------------------------------------------------------------ */
 
 static const test_case tests[] = {
@@ -136,6 +211,10 @@ static const test_case tests[] = {
     { "table_rom",         t_table_rom,         NULL },
     { "table_terminated",  t_table_terminated,  NULL },
     { "table_no_overlap",  t_table_regions_do_not_overlap, NULL },
+    { "reserve_splits_fast",     t_reserve_splits_fast,     NULL },
+    { "reserve_keeps_tail",      t_reserve_keeps_stack_and_rom, NULL },
+    { "reserve_rounds_up",       t_reserve_rounds_up,       NULL },
+    { "reserve_frees_no_kernel", t_reserve_no_free_fast_overlaps_kernel, NULL },
 };
 
 const test_suite memory_suite = { "mem", tests, sizeof tests / sizeof tests[0] };

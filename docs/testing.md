@@ -129,6 +129,10 @@ recorded as a fault and fails the test, rather than silently reading zero.
   the bit-to-level mapping. The level is recomputed on every write and driven
   onto the CPU's IPL lines, so autovector dispatch happens on the real 68000
   core, through a real vector table in chip RAM.
+- **A floating Zorro II bus** above the fast RAM the model provides: reads
+  return all ones, writes go nowhere. `detect_fast_ram` sizes memory by
+  probing a megabyte past the end and failing the read-back, so without this
+  the probe looked like a fault and the routine could not be tested at all.
 - **Stubs** that exist only to stop routines hanging: CIA-A/B and Zorro
   autoconfig space (reports no card).
 
@@ -242,7 +246,7 @@ acknowledgement is removed.
 
 
 Everything it turned up has been fixed, and the tests that found each bug now
-guard the fix. The suite is 128 tests, no xfails.
+guard the fix. The suite is 141 tests, no xfails.
 
 The storage path was in good shape from the start: `ide.s`, `find_rdb`, the
 FAT16 boot-sector parse, the directory scan, the chain walk and

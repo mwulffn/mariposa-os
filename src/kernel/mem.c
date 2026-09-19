@@ -35,7 +35,14 @@ void mem_init(MemEntry *map, void *kernel_end)
             chip_heap.total = map->size;
         } 
         else if (map->type == MEM_FAST) {
-            /* Fast heap starts after kernel image */
+            /*
+             * The map is authoritative: the ROM carves the loaded kernel out
+             * as MEM_RESERVED once it knows the size, so a MEM_FAST entry no
+             * longer covers our own image. This clamp used to be the only
+             * thing stopping the allocator handing out the kernel's code;
+             * it is kept as a guard against a stale ROM, where it would
+             * otherwise fail silently and horribly.
+             */
             unsigned long kend = align_up((unsigned long)kernel_end, 4);
             if (kend > map->base && kend < map->base + map->size) {
                 fast_heap.ptr = kend;

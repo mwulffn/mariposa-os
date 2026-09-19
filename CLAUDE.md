@@ -72,7 +72,8 @@ src/rom/                      - 256KB ROM, pure 68000 assembly
   bootstrap.s                 - Entry point, hardware init, vectors, boot sequence
   panic.s                     - Panic handler, register dump, exception entry points
   autoconfig.s                - Zorro II expansion autoconfig
-  memory.s                    - Memory detection, map table, map printing
+  memory.c                    - Memory detection, map table, map printing
+  memory_glue.s               - Register ABI shim between callers and memory.c
   serial.c                    - Serial port I/O (polled, see serial_glue.s)
   serial_glue.s               - Register ABI shim between callers and serial.c
   sprintf.c                   - Formatted output (see docs/rom/sprintf_api.md)
@@ -94,6 +95,7 @@ src/shared/                   - Compiled into BOTH the ROM and the kernel
   rdb.{c,h}                   - Rigid Disk Block parsing; returns structs, prints nothing
   fat16.{c,h}                 - Read-only FAT16; returns structs, prints nothing
   blkdev.h                    - Block device handle; seed of a device model
+  memmap.{c,h}                - The map the ROM builds and the kernel reads
 src/kernel/
   crt0.s                      - Startup stub, receives control from the ROM
   libsup.s                    - 32-bit divide/modulo helpers vbcc calls
@@ -108,6 +110,7 @@ tests/                        - Headless 68000 test harness (see docs/testing.md
   test_libsup.c               - src/kernel/libsup.s
   test_format.c               - sprintf.c, the ABI shim, and serial formatting
   test_vectors.c              - ROM header, vector table, panic frame decoding
+  test_memory.c               - memory.c, memmap.c, the kernel reservation
   test_irq.c                  - Paula interrupt registers, autovector dispatch
   test_disk.c                 - ata.c/ide.c, rdb.c, fat16.c, disk.c
   mksym.py                    - vasm listing -> flat symbol table
@@ -122,7 +125,7 @@ test_*.py                     - FS-UAE integration scripts
 ## Testing
 
 ```bash
-make test                      # headless, 128 tests, ~0.3s, no emulator needed
+make test                      # headless, 141 tests, ~0.3s, no emulator needed
 make test FILTER=rom.panic     # narrow to one group while iterating
 ```
 
@@ -135,6 +138,7 @@ code is the verdict: 0 pass, 1 test failed, 2 harness error.
 | `libsup.*` | `src/kernel/libsup.s`, assembled standalone - no C compiler needed |
 | `format.*` | `sprintf.c`, `sprintf_glue.s`, `serial_put_*`, `parse_hex` |
 | `rom.*` | ROM header, exception vector table, panic frame decoding |
+| `mem.*` | `memory.c`, `memmap.c`: detection, the map, the kernel reservation |
 | `irq.*` | INTENA/INTREQ, interrupt levels, autovector dispatch, UART TBE |
 | `disk.*` | `ata.c`, `ide.c`, `rdb.c`, `fat16.c` against a generated RDB + FAT16 image |
 
@@ -235,8 +239,6 @@ from disk. Both are covered by the `disk.*` tests.
 - The ROM does not tell the kernel where it booted from. The handoff passes
   only A0 (memory map) and A1 (panic vector); the partition LBA and size are
   computed and then dropped.
-- The memory map hands the kernel's own image out as free fast RAM. `mem.c`
-  works around it via `_end`; the table itself is still wrong.
 - `load_partition` reads the partition block from a hardcoded LBA 1 and
   ignores `RDB_PARTLIST`. `PART_NEXT` is printed but never followed, so only
   the first partition is reachable. Carried over unchanged from the assembly
@@ -245,7 +247,9 @@ from disk. Both are covered by the `disk.*` tests.
 - The debugger's `g` does not restore A7 - it RTEs onto the debugger's own
   stack. `DBG_STACK` is defined, unused, and at an odd address.
 - A fresh clone cannot `make run`: nothing creates `harddrives/boot.hdf`.
-- `detect_fast_ram` sizes memory by probing one megabyte past the end, and
-  relies on the failed read-back to stop. That works on a floating Zorro II
-  bus but means the routine cannot run under the headless harness, which
-  treats an unmapped access as a fault.
+- The memory map's flags are muddled. The ROM writes bit 0 and
+  `print_memory_map` prints it as `[DMA]`, but the kernel's `mem.h` called
+  bit 0 `MEMF_TESTED`. `src/shared/memmap.h` now records the ROM's actual
+  behaviour. Separately, fast RAM is marked DMA-capable, which is wrong -
+  Zorro II RAM is not reachable by the chipset's DMA. Nothing reads the
+  flags yet, so neither has bitten.
