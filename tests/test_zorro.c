@@ -78,10 +78,24 @@ static void t_not_zorro_ii_ignored(void)
 static void t_scan_terminates_with_card_present(void)
 {
     /* The card stops answering once relocated, so the scan must end rather
-     * than configure the same card eight times. */
+     * than configure the same card eight times. The empty slot that ends it
+     * reports itself, which is where the "No card found" after a successful
+     * card on a normal boot comes from - easy to drop by accident when the
+     * loop is restructured. */
     h_attach_zorro(ER_ZORRO_II | ER_SIZE_1M, ERF_MEMORY);
     configure();
+    CHECK_CONTAINS("Memory card found", h_serial());
+    CHECK_CONTAINS("No card found", h_serial());
     CHECK_CONTAINS("Autoconfig: Done", h_serial());
+}
+
+static void t_size_code_advances_next_base(void)
+{
+    /* A 128KB board must leave the next allocation at $220000, not $300000.
+     * The 8MB special case for code 0 is the trap here. */
+    h_attach_zorro(ER_ZORRO_II | ER_SIZE_128K, ERF_MEMORY);
+    CHECK_U32(FAST_BASE, configure());
+    CHECK_U32(FAST_BASE, h_zorro_base());
 }
 
 static const test_case tests[] = {
@@ -91,6 +105,7 @@ static const test_case tests[] = {
     { "io_card_shut_up",     t_io_card_shut_up,               NULL },
     { "not_zorro_ii",        t_not_zorro_ii_ignored,          NULL },
     { "scan_terminates",     t_scan_terminates_with_card_present, NULL },
+    { "size_code_128k",      t_size_code_advances_next_base,  NULL },
 };
 
 const test_suite zorro_suite = { "zorro", tests, sizeof tests / sizeof tests[0] };

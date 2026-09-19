@@ -25,7 +25,7 @@ ASM_INC  = $(filter-out $(ASM_MAIN),$(wildcard *.s))
 INCS     = $(wildcard *.i)
 
 # C sources, each compiled to assembly by vbcc then assembled to ELF.
-CSRC = sprintf.c serial.c ide.c disk.c memory.c
+CSRC = sprintf.c serial.c ide.c disk.c memory.c autoconfig.c
 
 # vbcc calls __divu for the / and % in %d. That lives in the kernel's
 # libsup.s, which is position independent and already covered by the

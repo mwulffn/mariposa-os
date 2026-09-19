@@ -426,7 +426,7 @@ generic_exc_msg:
 ; Include panic, autoconfig, memory, serial, sprintf, and debugger modules
 ; ============================================================
     include "panic.s"
-    include "autoconfig.s"
+    include "autoconfig_glue.s"
     include "memory_glue.s"
     include "serial_glue.s"
     include "sprintf_glue.s"

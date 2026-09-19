@@ -234,7 +234,8 @@ self-contained, heavily tested, and the thing `rom2c` had already failed at.
    `src/shared/fat16.c` parse and return structs; `src/rom/disk.c` holds the
    boot flow and every message. Neither shared file prints, which is the same
    mechanism-versus-policy line as serial.
-5. `autoconfig.s` and `memory.s`.
+5. ~~`autoconfig.s` and `memory.s`~~ — done. Both ROM-only; the map's
+   shape moved to `src/shared/memmap.h` since the kernel reads it.
 6. Split the debugger.
 
 ### Rules

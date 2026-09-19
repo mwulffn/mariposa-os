@@ -71,7 +71,8 @@ Makefile                      - Build orchestrator (rom, kernel, test, docker)
 src/rom/                      - 256KB ROM, pure 68000 assembly
   bootstrap.s                 - Entry point, hardware init, vectors, boot sequence
   panic.s                     - Panic handler, register dump, exception entry points
-  autoconfig.s                - Zorro II expansion autoconfig
+  autoconfig.c                - Zorro II expansion autoconfig
+  autoconfig_glue.s           - Register ABI shim between callers and autoconfig.c
   memory.c                    - Memory detection, map table, map printing
   memory_glue.s               - Register ABI shim between callers and memory.c
   serial.c                    - Serial port I/O (polled, see serial_glue.s)
@@ -111,6 +112,7 @@ tests/                        - Headless 68000 test harness (see docs/testing.md
   test_format.c               - sprintf.c, the ABI shim, and serial formatting
   test_vectors.c              - ROM header, vector table, panic frame decoding
   test_memory.c               - memory.c, memmap.c, the kernel reservation
+  test_zorro.c                - autoconfig.c against a modelled Zorro II card
   test_irq.c                  - Paula interrupt registers, autovector dispatch
   test_disk.c                 - ata.c/ide.c, rdb.c, fat16.c, disk.c
   mksym.py                    - vasm listing -> flat symbol table
@@ -125,7 +127,7 @@ test_*.py                     - FS-UAE integration scripts
 ## Testing
 
 ```bash
-make test                      # headless, 141 tests, ~0.3s, no emulator needed
+make test                      # headless, 148 tests, ~0.3s, no emulator needed
 make test FILTER=rom.panic     # narrow to one group while iterating
 ```
 
@@ -139,6 +141,7 @@ code is the verdict: 0 pass, 1 test failed, 2 harness error.
 | `format.*` | `sprintf.c`, `sprintf_glue.s`, `serial_put_*`, `parse_hex` |
 | `rom.*` | ROM header, exception vector table, panic frame decoding |
 | `mem.*` | `memory.c`, `memmap.c`: detection, the map, the kernel reservation |
+| `zorro.*` | `autoconfig.c` against a modelled Zorro II card |
 | `irq.*` | INTENA/INTREQ, interrupt levels, autovector dispatch, UART TBE |
 | `disk.*` | `ata.c`, `ide.c`, `rdb.c`, `fat16.c` against a generated RDB + FAT16 image |
 
@@ -247,6 +250,11 @@ from disk. Both are covered by the `disk.*` tests.
 - The debugger's `g` does not restore A7 - it RTEs onto the debugger's own
   stack. `DBG_STACK` is defined, unused, and at an odd address.
 - A fresh clone cannot `make run`: nothing creates `harddrives/boot.hdf`.
+- `configure_zorro_ii` advances its slot pointer by $10000 per card. Every
+  Zorro II board answers at $E80000 in turn, so a second card would be looked
+  for in the wrong place and never found. Harmless today because the space
+  above the slot floats and the scan just ends, and because one card is all
+  anything here has.
 - The memory map's flags are muddled. The ROM writes bit 0 and
   `print_memory_map` prints it as `[DMA]`, but the kernel's `mem.h` called
   bit 0 `MEMF_TESTED`. `src/shared/memmap.h` now records the ROM's actual
