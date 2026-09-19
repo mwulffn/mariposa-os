@@ -2,12 +2,38 @@
 
 > **Status.** This is the target design. Both serial paths are polled today
 > and neither uses interrupts or a ring buffer: `src/kernel/serial.c` spins on
-> SERDATR's TBE bit, and `src/rom/serial.s` spins on TSRE. The interrupt-driven
+> SERDATR's TBE bit, and `src/rom/serial.s` spins on TSRE. Both now go through
+> the shared primitives in `src/shared/serial_hw.c`, which is where that
+> difference is visible rather than buried in two implementations. The interrupt-driven
 > transmit path below waits on interrupts working at all - see
 > `docs/interrupt_control_design.md`.
 >
 > The crash path described here does already hold: the ROM debugger bangs the
 > UART directly, so it keeps working when everything else has stopped.
+
+## What ROM and kernel share, and what they must not
+
+`src/shared/serial_hw.c` holds the register primitives: set the divisor, ask
+whether TBE or TSRE or RBF is set, hand over a byte, take a byte. Nothing in
+it blocks, allocates or keeps state.
+
+**The waiting strategy is deliberately not shared.** The two sides need
+opposite things:
+
+| | ROM | Kernel |
+|---|---|---|
+| Strategy | poll | ring buffer + level 1 TBE interrupt |
+| Why | the debugger must work on a machine whose kernel has died, with interrupts in an unknown state | kprintf must not block callers at 9600 baud |
+| Depends on interrupts | never | yes |
+
+Sharing the strategy would give the kernel an inherited spin loop, or give
+the ROM a dependency on interrupts working at the exact moment they are least
+likely to. So `src/rom/serial.c` polls, `src/kernel/serial.c` will buffer,
+and both sit on the same primitives underneath.
+
+The kernel still needs a polled path for panic, before interrupts are up and
+after they have stopped being trustworthy. That is the same primitives called
+directly, not a second driver.
 
 ## Overview
 

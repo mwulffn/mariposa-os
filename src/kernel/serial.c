@@ -1,27 +1,32 @@
 /*
- * serial.c - Serial port output (polling)
+ * serial.c - kernel serial output
  *
- * Uses Paula's UART at $DFF000.
- * 9600 baud, 8N1.
+ * Polled today. This is the half of serial that is NOT shared with the ROM,
+ * and deliberately so: the target here is a ring buffer drained by the level
+ * 1 TBE interrupt, so kprintf is not held hostage to 9600 baud, while the
+ * ROM must keep polling because its debugger has to work on a machine whose
+ * kernel has already died. See docs/serial_design.md.
+ *
+ * Everything below the waiting strategy lives in src/shared/serial_hw.c, so
+ * when the interrupt path lands only this file changes.
  */
 
 #include "serial.h"
-#include "amiga_hw.h"
+#include "serial_hw.h"
 
 void ser_init(void)
 {
-    /* 9600 baud - ROM should have set this, but be sure */
-    custom.serper = SERPER_9600;
+    /* The ROM has already done this; make the state explicit anyway. */
+    serial_hw_init(SERIAL_BAUD_9600);
 }
 
 void ser_putc(char c)
 {
-    /* Wait for transmit buffer empty */
-    while (!(custom.serdatr & SERDATF_TBE))
+    /* Spin until the UART will take it. Replaced by an enqueue onto the ring
+     * buffer once interrupts exist - see docs/serial_design.md. */
+    while (!serial_hw_tx_ready())
         ;
-    
-    /* Send character with stop bit */
-    custom.serdat = (unsigned short)c | 0x100;
+    serial_hw_tx((unsigned char)c);
 }
 
 void ser_puts(const char *s)
@@ -32,15 +37,12 @@ void ser_puts(const char *s)
 
 int ser_can_read(void)
 {
-    return (custom.serdatr & SERDATF_RBF) != 0;
+    return serial_hw_rx_ready();
 }
 
 char ser_getc(void)
 {
-    /* Wait for receive buffer full */
-    while (!(custom.serdatr & SERDATF_RBF))
+    while (!serial_hw_rx_ready())
         ;
-    
-    /* Read data, clear RBF by reading */
-    return (char)(custom.serdatr & 0xFF);
+    return (char)serial_hw_rx();
 }

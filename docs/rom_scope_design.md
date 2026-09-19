@@ -226,7 +226,12 @@ self-contained, heavily tested, and the thing `rom2c` had already failed at.
 - **No writable statics in ROM C** until `romcrt0.s` exists. Scratch goes in
   chip RAM at a fixed address, as `SPRINTF_BUFFER` does.
 - **Shared code lives in one file** compiled against two linker scripts, not
-  copied.
+  copied. It goes in `src/shared/`.
+- **Share mechanism, never policy.** The ROM polls and must keep working when
+  the kernel is dead; the kernel wants interrupts and buffering. Serial is the
+  first case and the template: `serial_hw.c` knows how to hand the UART a
+  byte, and nothing about how to wait. The same split is coming for block
+  I/O - ATA protocol is shared, transport and blocking are not.
 - **Keep `bsr` reachable.** It is a 16-bit displacement, ±32KB. At 9680 bytes
   there is enormous headroom, but the ROM growing past 32KB of code would
   start breaking `bsr` to distant symbols, which is one of the things that
