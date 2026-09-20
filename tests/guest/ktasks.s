@@ -27,6 +27,7 @@
         xdef    body_waker
         xdef    body_sampler
         xdef    body_caller2
+        xdef    isr_count_ack
         xdef    body_regs
         xdef    body_overflow
 
@@ -202,3 +203,12 @@ body_overflow:
         move.l  4(a2),a0
         jsr     (a0)
 .hang:  bra.s   .hang
+
+; An interrupt handler, for kirq.*: void handler(void *arg). Counts, then
+; acknowledges whatever INTREQ bits the test put in param - or none, for the
+; test that wants to see what an unacknowledged source does.
+isr_count_ack:
+        move.l  4(sp),a0
+        addq.l  #1,(a0)
+        move.w  10(a0),$DFF09C          ; low word of param; bit 15 clear = CLR
+        rts

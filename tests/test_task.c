@@ -163,6 +163,36 @@ static void tick_preempts(int model, uint32_t cpu)
     CHECK(ca < 2 * cb && cb < 2 * ca, "unfair split: a=%u b=%u", ca, cb);
 }
 
+/*
+ * What a tick costs. Every interrupt now goes through a C dispatcher, and
+ * that is worth its price only while the price is known: measured as the
+ * work a lone spinner loses per tick. At 50Hz a tick is ~141,800 cycles
+ * apart, so 4000 is under 3% of the machine.
+ */
+static void tick_cost_is_bounded(int model, uint32_t cpu)
+{
+    uint32_t a, quiet, ticked, lost, per_tick, n;
+
+    setup(model, cpu);
+    h_vbl_every(0);
+    a = block(NULL, 0, 0, NULL);
+    spawn("spin", "body_spinner", a, 1024, PRIO_NORMAL);
+    run(200000);                                /* settle in */
+
+    quiet = count(a);  run(2000000);  quiet = count(a) - quiet;
+
+    h_vbl_every(TICK);
+    n = ticks();
+    ticked = count(a); run(2000000);  ticked = count(a) - ticked;
+    n = ticks() - n;
+
+    CHECK(n > 50, "only %u ticks", n);
+    lost = quiet - ticked;                      /* laps; a lap is 2000000/quiet cycles */
+    per_tick = (uint32_t)((uint64_t)lost * 2000000u / quiet / n);
+    CHECK(per_tick < 4000, "a tick costs about %u cycles", per_tick);
+    CHECK(per_tick > 200, "implausibly cheap tick: %u cycles", per_tick);
+}
+
 /* Preemption lands mid-instruction-stream at arbitrary points, and every
  * register has to come back - to the right task. */
 static void registers_survive(int model, uint32_t cpu)
@@ -326,7 +356,10 @@ static void kprintf_lines_stay_whole(int model, uint32_t cpu)
     int lines = 0;
 
     setup(model, cpu);
-    h_vbl_every(2999);
+    /* Fast, but not so fast that the tick itself eats the machine: at a
+     * period near the tick's own cost, only code inside a critical section
+     * makes progress and the other task starves. 50Hz is ~141,800 cycles. */
+    h_vbl_every(5003);
     a = block("kernel:_kprintf", 3, h_str("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"), NULL);
     b = block("kernel:_kprintf", 3, h_str("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"), NULL);
     spawn("a", "body_caller2", a, 2048, PRIO_NORMAL);
@@ -425,6 +458,7 @@ static void idle_halts(int model, uint32_t cpu)
 
 ON(yield_alternates)
 ON(tick_preempts)
+ON(tick_cost_is_bounded)
 ON(registers_survive)
 ON(no_switch_above_task_level)
 ON(priority_wins)
@@ -448,6 +482,7 @@ static void registers_survive_68040(void) { g_started = 0; registers_survive(680
 static const test_case tests[] = {
     T("yield_alternates",   yield_alternates),
     T("tick_preempts",      tick_preempts),
+    T("tick_cost_bounded",  tick_cost_is_bounded),
     T("registers_survive",  registers_survive),
     { "registers_survive.68010", registers_survive_68010, NULL },
     { "registers_survive.68040", registers_survive_68040, NULL },

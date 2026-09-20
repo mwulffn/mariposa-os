@@ -25,6 +25,7 @@
 #include "serial_hw.h"
 #include "amiga_hw.h"
 #include "cpu.h"
+#include "irq.h"
 
 #define RING_MASK (SER_RING_SIZE - 1)
 
@@ -34,8 +35,8 @@ static volatile unsigned short tail;        /* next byte to send: consumers */
 static unsigned char           irq_mode;    /* ser_irq_enable has run */
 
 /* Everything below that touches the ring runs with interrupts
- * masked: inside CRITICAL_ENTER, or in the ISR, which vectors.s enters at
- * level 7 for the same reason. */
+ * masked: inside CRITICAL_ENTER, or in the ISR, which switch.s enters with
+ * everything masked for the same reason. */
 
 static int ring_empty(void) { return head == tail; }
 static int ring_full(void)  { return ((head + 1) & RING_MASK) == tail; }
@@ -69,7 +70,7 @@ void ser_irq_enable(void)
 {
     CRITICAL_ENTER();
     irq_mode = 1;
-    custom.intena = INTF_SETCLR | INTF_TBE;
+    irq_enable(IRQ_TBE);
 
     /* Bytes may already be queued behind an interrupt that is not coming:
      * irq_init clears INTREQ wholesale, and so can anyone else. Raising TBE
@@ -114,8 +115,10 @@ void ser_puts(const char *s)
         ser_putc(*s++);
 }
 
-void ser_tbe_isr(void)
+void ser_tbe_isr(void *arg)
 {
+    (void)arg;
+
     /* Acknowledge before looking, so a byte that frees the buffer between
      * the two is a fresh request rather than a lost one. */
     custom.intreq = INTF_TBE;

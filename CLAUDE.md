@@ -104,11 +104,11 @@ src/kernel/
   cpu.{s,h}                   - SR primitives, CRITICAL_ENTER/EXIT, cpu_idle
   isr.s                       - Minimal vertical-blank ISR; the tests' reference handler.
                                 The kernel itself installs switch.s's tick_handler
-  vectors.s                   - Stubs that call C: serial TBE ISR, crash flush
-  switch.s                    - Context switch: tick handler, isr_exit, TRAP #0 yield
+  vectors.s                   - Crash stubs: flush serial, then chain to the ROM handler
+  switch.s                    - Context switch: level entries, isr_exit, TRAP #0 yield
   task.{c,h}                  - Tasks, priorities, sleep, wait queues, exit and reaping
   vector.{c,h}                - cpu_type and vector_set(): the table is at VBR on 68010+
-  irq.{c,h}                   - Vector install and INTENA setup
+  irq.{c,h}                   - irq_attach and per-level dispatch; sole owner of INTENA
   libsup.s                    - 32-bit divide/modulo helpers vbcc calls
   kernel.c                    - Kernel entry point
   mem.c                       - Free-list allocator: chip best-fit, fast/slow first-fit
@@ -130,6 +130,7 @@ tests/                        - Headless 68000 test harness (see docs/testing.md
   test_kserial.c              - src/kernel/serial.c, run out of the real SYSTEM.BIN
   test_boot.c                 - bootinfo layout, and entering the real kernel with it
   test_kmem.c                 - src/kernel/mem.c against hand-built memory maps
+  test_kirq.c                 - irq_attach: shared levels, enable/disable, unhandled sources
   test_task.c                 - The scheduler, every test on a 68000 and a 68020 core
   guest/ktasks.s              - Bodies of the tasks the scheduler tests run
   test_disk.c                 - ata.c/ide.c, rdb.c, fat16.c, disk.c
@@ -145,7 +146,7 @@ test_*.py                     - FS-UAE integration scripts
 ## Testing
 
 ```bash
-make test                      # headless, 251 tests, ~0.3s, no emulator needed
+make test                      # headless, 258 tests, ~0.3s, no emulator needed
 make test FILTER=rom.panic     # narrow to one group while iterating
 ```
 
@@ -164,6 +165,7 @@ code is the verdict: 0 pass, 1 test failed, 2 harness error.
 | `cpu.*` | `src/kernel/cpu.s` SR primitives, `cpu_idle`, and `isr.s` vertical-blank handler |
 | `boot.*` | CPU detection on five cores; `bootinfo.h` layout as an ABI; the real kernel entered with good, bad and short handoffs |
 | `kmem.*` | `src/kernel/mem.c`: fit policy, coalescing, bad frees, ownership, `mem_check`, random churn |
+| `kirq.*` | `irq.c`: several sources on one level, enabled-and-pending, unhandled sources shut off |
 | `task.*` | `task.c` + `switch.s`: yield, preemption, priorities, sleep, wait queues, exit, stack overflow - each on two CPU cores |
 | `kser.*` | `src/kernel/serial.c` + `vectors.s`: ring buffer, TBE ISR, full ring, crash flush |
 | `disk.*` | `ata.c`, `ide.c`, `rdb.c`, `fat16.c` against a generated RDB + FAT16 image |
@@ -271,6 +273,12 @@ instead, and `mem.stack_*` pins it.
   `build_initial_frame` knows an exception frame's layout. Verified under
   FS-UAE with `cpu = 68000` and `cpu = 68020`. `kernel_main` ends in
   `sched_start()`, which turns the boot context into the idle task.
+- Drivers follow `docs/driver_design.md`: two halves and a queue, typed
+  device classes and a registry (not yet built), no generic async IO layer,
+  and "spend fast RAM to save cycles and chip RAM". The interrupt layer is
+  in: handlers attach to a Paula source with `irq_attach`, every level is
+  dispatched, and only `irq.c` writes INTENA. The GUI layer is open, and the
+  blitter driver waits on it.
 - **Build gotcha:** macOS ships make 3.81, which compares timestamps to the
   second. Two builds inside one second leave a stale object in the link -
   it bit a scripted edit-build-test loop here, not normal use. When

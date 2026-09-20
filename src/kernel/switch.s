@@ -18,38 +18,55 @@
 ; a different context switch.
 ; ============================================================
 
-INTREQ          equ $DFF09C
-INTF_VERTB      equ $0020
-
         section .text
 
-        xdef    _tick_handler
+        xdef    _irq_level1
+        xdef    _irq_level2
+        xdef    _irq_level3
+        xdef    _irq_level4
+        xdef    _irq_level5
+        xdef    _irq_level6
         xdef    _yield_handler
         xdef    _task_yield
         xdef    isr_exit
         xdef    _need_resched
         xdef    _isr_depth
 
-        xref    _sched_tick
+        xref    _irq_dispatch
         xref    _sched_switch
-        xref    _vbl_count
 
 ; ------------------------------------------------------------
-; tick_handler - level 3 autovector, vertical blank, 50Hz
+; irq_level1..6 - the autovector entries
 ; ------------------------------------------------------------
-; Masks everything for its short life: the scheduler's queues are also
-; touched by wake_one/wake_all from handlers at other levels.
-_tick_handler:
+; Paula shares each level between several sources, so the vector cannot go
+; to a device's handler: it comes here, and irq_dispatch (irq.c) runs the
+; handler of every source on the level that is enabled and pending.
+;
+; Everything is masked for the duration. The 68000 only masked this level
+; and below, and the state handlers touch - the serial ring, the scheduler's
+; queues via wake_one - is also touched from the other levels.
+;
+; D0/D1/A0/A1 are what vbcc treats as scratch, so they are what C destroys.
+irq_entry       macro
         or.w    #$0700,sr
-        addq.b  #1,_isr_depth
         movem.l d0-d1/a0-a1,-(sp)
+        pea     \1
+        bra     irq_common
+        endm
 
-        move.w  #INTF_VERTB,INTREQ
-        addq.l  #1,_vbl_count
-        jsr     _sched_tick
+_irq_level1:    irq_entry 1
+_irq_level2:    irq_entry 2
+_irq_level3:    irq_entry 3
+_irq_level4:    irq_entry 4
+_irq_level5:    irq_entry 5
+_irq_level6:    irq_entry 6
 
-        movem.l (sp)+,d0-d1/a0-a1
+irq_common:
+        addq.b  #1,_isr_depth
+        jsr     _irq_dispatch
+        addq.l  #4,sp
         subq.b  #1,_isr_depth
+        movem.l (sp)+,d0-d1/a0-a1
         ; fall through
 
 ; ------------------------------------------------------------

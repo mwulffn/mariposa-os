@@ -1,5 +1,5 @@
 ; ============================================================
-; vectors.s - interrupt and exception entry stubs that call C
+; vectors.s - exception entry stubs that call C
 ; ============================================================
 ; Unlike cpu.s and isr.s this is not position independent and is not
 ; assembled standalone: it references C. The tests reach it through the
@@ -8,32 +8,9 @@
 
         section .text
 
-        xdef    _ser_tbe_handler
         xdef    _trap_init
 
-        xref    _ser_tbe_isr
         xref    _ser_flush
-        xref    isr_exit
-        xref    _isr_depth
-
-; ------------------------------------------------------------
-; ser_tbe_handler - level 1 autovector, serial transmit buffer empty
-; ------------------------------------------------------------
-; Raises the mask to 7 before touching anything. The 68000 has only raised
-; it to 1, so a vertical blank handler that calls kprintf would otherwise
-; walk into the ring buffer while this is halfway through moving its tail.
-; The body is a few dozen instructions; nothing is kept waiting long.
-;
-; D0/D1/A0/A1 are the registers vbcc treats as scratch, so they are the
-; ones a call into C can destroy.
-_ser_tbe_handler:
-        or.w    #$0700,sr
-        addq.b  #1,_isr_depth
-        movem.l d0-d1/a0-a1,-(sp)
-        jsr     _ser_tbe_isr
-        movem.l (sp)+,d0-d1/a0-a1
-        subq.b  #1,_isr_depth
-        jmp     isr_exit            ; every handler leaves this way: switch.s
 
 ; ------------------------------------------------------------
 ; Crash stubs - get queued serial output out before the ROM panics

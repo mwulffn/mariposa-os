@@ -23,8 +23,8 @@
 void ser_init(void);
 
 /*
- * Switch to interrupt-driven transmit. The level 1 vector must already point
- * at ser_tbe_handler - irq_init() does both. Safe to call again at any time:
+ * Switch to interrupt-driven transmit. ser_tbe_isr must already be attached
+ * to IRQ_TBE - irq_init() does both. Safe to call again at any time:
  * it restarts a transmitter whose interrupt was lost.
  */
 void ser_irq_enable(void);
@@ -53,12 +53,9 @@ void ser_flush(void);
 /* Bytes queued and not yet handed to the UART. */
 unsigned long ser_tx_pending(void);
 
-/* The C half of the TBE interrupt. Called by ser_tbe_handler in vectors.s
- * with all interrupts masked; not for anyone else. */
-void ser_tbe_isr(void);
-
-/* The level 1 autovector handler, in vectors.s. */
-void ser_tbe_handler(void);
+/* The TBE interrupt handler, attached to IRQ_TBE by irq_init(). Runs with
+ * all interrupts masked; not for anyone else. */
+void ser_tbe_isr(void *arg);
 
 /*
  * Check if receive buffer has data.
