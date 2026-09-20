@@ -13,9 +13,11 @@ SYM ?= ../src/rom/build/kick.sym
 # The kernel's vbcc support library. Assembled standalone here rather than
 # built with the kernel, so these tests need no C cross compiler.
 ASM        ?= vasmm68k_mot
-LIBSUP_SRC  = ../src/kernel/libsup.s
-LIBSUP_BIN  = $(BUILD)/libsup.bin
-LIBSUP_SYM  = $(BUILD)/libsup.sym
+# Kernel assembly that is position independent and so can be assembled
+# standalone and loaded by the harness: the maths helpers, and now the
+# interrupt primitives and the ISRs.
+MODULES     = libsup cpu isr
+MODULE_SYMS = $(MODULES:%=$(BUILD)/%.sym)
 
 BUILD  = build
 TARGET = $(BUILD)/run-tests
@@ -34,7 +36,7 @@ CFLAGS_MUSASHI = -O2 -g -w -I$(MUSASHI_DIR) -DM68K_EMULATE_INT_ACK=1
 LDLIBS         = -lm
 
 TEST_SRC = main.c protocol.c harness.c test_format.c test_memory.c test_zorro.c \
-           test_vectors.c test_irq.c test_disk.c test_libsup.c
+           test_vectors.c test_irq.c test_disk.c test_libsup.c test_cpu.c
 TEST_OBJ = $(TEST_SRC:%.c=$(BUILD)/%.o)
 
 MUSASHI_OBJ = $(BUILD)/m68kcpu.o $(BUILD)/m68kdasm.o $(BUILD)/m68kops.o \
@@ -49,7 +51,7 @@ all: $(TARGET)
 # Exit code is the verdict: 0 all passed, 1 a test failed, 2 harness error.
 # FILTER=substring narrows the run to matching "suite.test" names.
 FILTER ?=
-run: $(TARGET) $(DISK_STAMP) $(LIBSUP_SYM)
+run: $(TARGET) $(DISK_STAMP) $(MODULE_SYMS)
 	@./$(TARGET) --rom $(ROM) --sym $(SYM) --builddir $(BUILD) $(if $(FILTER),--filter $(FILTER),)
 
 $(BUILD):
@@ -66,11 +68,11 @@ $(DISK_STAMP): mkdisk.py | $(BUILD)
 
 $(BUILD)/test_disk.o: $(DISK_STAMP)
 
-# libsup.s is position independent, so origin zero is fine - the harness
-# loads it elsewhere and biases its symbols to match.
-$(LIBSUP_SYM): $(LIBSUP_SRC) mksym.py | $(BUILD)
-	$(ASM) -Fbin -m68000 -no-opt -o $(LIBSUP_BIN) -L $(BUILD)/libsup.lst $(LIBSUP_SRC)
-	@python3 mksym.py $(BUILD)/libsup.lst $(LIBSUP_SYM)
+# Assembled at origin zero - the harness loads each one elsewhere and
+# biases its symbols to match.
+$(BUILD)/%.sym: ../src/kernel/%.s mksym.py | $(BUILD)
+	$(ASM) -Fbin -m68000 -no-opt -o $(BUILD)/$*.bin -L $(BUILD)/$*.lst $<
+	@python3 mksym.py $(BUILD)/$*.lst $@
 
 # Objects depend on this Makefile so a CFLAGS change actually rebuilds them.
 # Without it, flipping -DM68K_EMULATE_INT_ACK left stale Musashi objects in

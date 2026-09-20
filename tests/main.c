@@ -8,6 +8,7 @@
  */
 #include "protocol.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -18,9 +19,19 @@ extern const test_suite memory_suite;
 extern const test_suite zorro_suite;
 extern const test_suite disk_suite;
 extern const test_suite libsup_suite;
+extern const test_suite cpu_suite;
 
-/* libsup.s is assembled to origin zero and loaded here. */
-#define LIBSUP_BASE 0x00100000u
+/*
+ * Position-independent kernel assembly, assembled to origin zero and loaded
+ * here. Each needs its own base: the symbols are merged into one table with
+ * a per-module bias, so overlapping them would give two modules the same
+ * addresses.
+ */
+static const struct { const char *name; uint32_t base; } modules[] = {
+    { "libsup", 0x00100000u },
+    { "cpu",    0x00110000u },
+    { "isr",    0x00120000u },
+};
 
 /* Where mkdisk.py put the generated disk images. */
 void t_set_disk_dir(const char *dir);
@@ -52,19 +63,19 @@ int main(int argc, char **argv)
 
     t_set_disk_dir(builddir);
 
-    {
+    for (i = 0; i < (int)(sizeof modules / sizeof modules[0]); i++) {
         char path[512];
-        snprintf(path, sizeof path, "%s/libsup.bin", builddir);
-        if (h_load_module(path, LIBSUP_BASE) != 0)
+        snprintf(path, sizeof path, "%s/%s.bin", builddir, modules[i].name);
+        if (h_load_module(path, modules[i].base) != 0)
             return 2;
-        snprintf(path, sizeof path, "%s/libsup.sym", builddir);
-        if (h_add_symbols(path, LIBSUP_BASE) != 0)
+        snprintf(path, sizeof path, "%s/%s.sym", builddir, modules[i].name);
+        if (h_add_symbols(path, modules[i].base) != 0)
             return 2;
     }
 
     {
         const test_suite suites[] = { libsup_suite, format_suite,
-                                      vector_suite, irq_suite,
+                                      vector_suite, irq_suite, cpu_suite,
                                       memory_suite, zorro_suite,
                                       disk_suite };
         rc = run_suites(suites, sizeof suites / sizeof suites[0], filter);

@@ -17,8 +17,8 @@ BUILD   = build
 TARGET  = $(BUILD)/SYSTEM.BIN
 
 # Sources
-ASRC    = crt0.s libsup.s
-CSRC    = kernel.c mem.c serial.c kprintf.c
+ASRC    = crt0.s libsup.s cpu.s isr.s
+CSRC    = kernel.c mem.c serial.c kprintf.c irq.c
 
 # Shared with the ROM: hardware definitions and the UART register
 # primitives. The waiting strategy is not shared - see serial_hw.h.

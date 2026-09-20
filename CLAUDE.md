@@ -99,6 +99,9 @@ src/shared/                   - Compiled into BOTH the ROM and the kernel
   memmap.{c,h}                - The map the ROM builds and the kernel reads
 src/kernel/
   crt0.s                      - Startup stub, receives control from the ROM
+  cpu.{s,h}                   - SR primitives and CRITICAL_ENTER/EXIT
+  isr.s                       - Interrupt service routines (vertical blank)
+  irq.{c,h}                   - Vector install and INTENA setup; not called yet
   libsup.s                    - 32-bit divide/modulo helpers vbcc calls
   kernel.c                    - Kernel entry point
   mem.c                       - Bump allocator
@@ -114,6 +117,7 @@ tests/                        - Headless 68000 test harness (see docs/testing.md
   test_memory.c               - memory.c, memmap.c, the kernel reservation
   test_zorro.c                - autoconfig.c against a modelled Zorro II card
   test_irq.c                  - Paula interrupt registers, autovector dispatch
+  test_cpu.c                  - src/kernel/cpu.s and isr.s, loaded as modules
   test_disk.c                 - ata.c/ide.c, rdb.c, fat16.c, disk.c
   mksym.py                    - vasm listing -> flat symbol table
   mkdisk.py                   - Generates the RDB + FAT16 test disk images
@@ -127,7 +131,7 @@ test_*.py                     - FS-UAE integration scripts
 ## Testing
 
 ```bash
-make test                      # headless, 148 tests, ~0.3s, no emulator needed
+make test                      # headless, 180 tests, ~0.3s, no emulator needed
 make test FILTER=rom.panic     # narrow to one group while iterating
 ```
 
@@ -143,6 +147,7 @@ code is the verdict: 0 pass, 1 test failed, 2 harness error.
 | `mem.*` | `memory.c`, `memmap.c`: detection, the map, the kernel reservation |
 | `zorro.*` | `autoconfig.c` against a modelled Zorro II card |
 | `irq.*` | INTENA/INTREQ, interrupt levels, autovector dispatch, UART TBE |
+| `cpu.*` | `src/kernel/cpu.s` SR primitives and `isr.s` vertical-blank handler |
 | `disk.*` | `ata.c`, `ide.c`, `rdb.c`, `fat16.c` against a generated RDB + FAT16 image |
 
 Prefer this tier for anything that is pure logic. Use FS-UAE only for
@@ -227,7 +232,12 @@ instead, and `mem.stack_*` pins it.
 
 **Next up**
 
-- Interrupts. Nothing enables them today: `bootstrap.s` clears INTENA
+- Interrupts. The primitives now exist and are tested, but nothing enables
+  them - see the FS-UAE delivery issue below. `src/kernel/cpu.s` has the
+  four SR wrappers and `cpu.h` the critical-section macros;
+  `src/kernel/isr.s` has a vertical-blank handler that acks and counts, and
+  `irq.c` installs it. 12 tests in `cpu.*`. Nothing calls `irq_init` yet.
+  Original note follows. Nothing enables them today: `bootstrap.s` clears INTENA
   including the master bit and never writes it again, and sets SR to $2700
   immediately before jumping to the kernel, which never lowers it. `cpu.s`
   from `docs/interrupt_control_design.md` is unwritten. Everything below
@@ -260,6 +270,30 @@ instead, and `mem.stack_*` pins it.
   It is entered by `jmp` from `bootstrap.s` and by `jsr` through the
   kernel's `rom_panic` pointer, and those two disagree about whether there
   is a return address to resume to. `g` from a real fault is unaffected.
+- **Interrupts do not arrive under FS-UAE.** With `cpu = 68000` cycle-exact
+  on the A600 config, the moment SR is lowered the machine takes an ILLEGAL
+  INSTRUCTION at `PC=$00000008` with `SR=$2300` - mask 3, so the level 3
+  interrupt was accepted - and A0 is `illegal_msg`, so it is a real vector 4
+  fault, not the autovector handler. Established, not guessed:
+  - The vector table is correct at the time of the crash. The debugger dumps
+    `$6C = $00FC0248 = auto_vec_handler`, and `$64-$7C` all match. With the
+    kernel's own handler installed, `$6C = $00200066` and disassembles to
+    the right instructions.
+  - `intenar = $4020` after `irq_init` - master enable plus VERTB, nothing
+    else - and `intreqr = $0000`.
+  - Lowering SR with no sources enabled is safe. The crash needs a source.
+  - It is not the handler body: an ack-and-`rte` handler crashes the same
+    way, and so does leaving the ROM's `auto_vec_handler` in place.
+  - It is not serial I/O: a silent spin loop crashes identically.
+  - `PC=$00000008` is vector 2's *slot address*, not its contents
+    (`$00FC01DA`), and the word there is `$00FC`, which is illegal - so the
+    CPU really is executing at $8.
+  - The same path works in the headless harness on a real 68000 core:
+    `irq.rom_autovector_panics` and the 12 `cpu.*` tests pass.
+  Not yet checked: the A500 config, which cannot boot the kernel at all
+  because its RDB scan finds nothing. Do not assume an emulator bug - that
+  diagnosis was made once before on the `isr` branch and was wrong three
+  times over.
 - A fresh clone cannot `make run`: nothing creates `harddrives/boot.hdf`.
 - `configure_zorro_ii` advances its slot pointer by $10000 per card. Every
   Zorro II board answers at $E80000 in turn, so a second card would be looked
