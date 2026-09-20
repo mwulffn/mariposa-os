@@ -19,8 +19,21 @@ static void t_rom_header(void)
 {
     CHECK_U32(H_ROM_BASE, h_sym("rom_start"));
     CHECK_U32(0x414D4147u, h_peek32(H_ROM_BASE + 8));    /* 'AMAG' */
-    /* Last longword of the ROM points back at its start. */
-    CHECK_U32(H_ROM_BASE, h_peek32(H_ROM_BASE + H_ROM_SIZE - 4));
+    /* The back-pointer sits just below the 16-byte IACK table. */
+    CHECK_U32(H_ROM_BASE, h_peek32(H_ROM_BASE + H_ROM_SIZE - 20));
+}
+
+static void t_rom_iack_table(void)
+{
+    /* The ROM must end 0018 0019 ... 001F. During interrupt acknowledge the
+     * CPU reads $FFFFF1 + 2*level and UAE's cycle-exact 68000 takes that
+     * byte as the vector number. Zeros here turned every interrupt into
+     * vector 0: PC loaded from $0, ILLEGAL INSTRUCTION at $8. */
+    uint32_t level;
+
+    for (level = 0; level < 8; level++)
+        CHECK_U32(0x18 + level,
+                  h_peek16(H_ROM_BASE + H_ROM_SIZE - 16 + 2 * level));
 }
 
 /* --- exception vector table --------------------------------------------- */
@@ -260,6 +273,7 @@ static void t_panic_group0_reports_pc_on_serial(void)
 
 static const test_case tests[] = {
     { "rom_header",                 t_rom_header,                 NULL },
+    { "iack_table",                 t_rom_iack_table,             NULL },
     { "specific_handlers",          t_vectors_specific_handlers,  NULL },
     { "survive_generic_fill",       t_vectors_survive_generic_fill, NULL },
     { "unassigned_are_generic",     t_vectors_unassigned_are_generic, NULL },

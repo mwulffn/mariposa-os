@@ -420,11 +420,26 @@ generic_exc_msg:
     include "disk_glue.s"
 
 ; ============================================================
-; ROM footer - pad to 256KB and add checksum location
+; ROM footer - back-pointer and the interrupt vector number table
 ; ============================================================
-    ; rom.ld pins this at $FFFFFC, the last longword of the ROM.
+    ; rom.ld pins this at $FFFFEC, so the table below ends the ROM exactly.
     section .romend,data
 rom_end:
     dc.l    rom_start
+
+; The last 16 bytes of every Kickstart are 0018 0019 ... 001F, and they are
+; not decoration. During an interrupt acknowledge cycle the 68000 drives the
+; address bus to all ones with the level on A1-A3, so the cycle looks like a
+; byte read of $FFFFF1 + 2*level - which is ROM. A machine that answers that
+; cycle from the bus instead of asserting VPA hands the CPU whatever byte
+; sits there as the vector NUMBER. Kickstart makes that byte 24+level, the
+; autovector, so both kinds of machine end up in the same place.
+;
+; UAE's cycle-exact 68000 does exactly this. With zeros here every interrupt
+; became vector 0, the CPU loaded PC from $0 (which holds 0), executed two
+; ORI.B #0,D0 out of the empty reset vectors and took ILLEGAL INSTRUCTION
+; at $8 with the interrupt's own mask in SR. Pinned by rom.iack_table.
+iack_vector_table:
+    dc.w    $18,$19,$1A,$1B,$1C,$1D,$1E,$1F
 
     end

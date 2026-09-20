@@ -28,7 +28,9 @@ SECTIONS
         *(.data)
     }
 
-    /* The last longword of the ROM points back at its start. */
-    . = 0xFFFFFC;
+    /* A pointer back to the start of the ROM, then the 16-byte interrupt
+     * vector number table that must be the very end of the image - see
+     * iack_vector_table in bootstrap.s. */
+    . = 0xFFFFEC;
     .romend : { *(.romend) }
 }

@@ -377,12 +377,16 @@ static void irq_update(void)
     m68k_set_irq((unsigned int)level);
 }
 
-/* The Amiga is fully autovectored: no device puts a vector on the bus. The
- * callback exists only so Musashi leaves the IRQ line alone afterwards. */
+/* Answer the interrupt acknowledge cycle the way UAE's cycle-exact 68000
+ * does: as a byte read of $FFFFF1 + 2*level, the address the CPU drives
+ * during IACK, which lands in the last 16 bytes of the ROM. The byte is the
+ * vector NUMBER. Kickstart ends in 0018 0019 ... 001F so that read yields
+ * the autovector; a ROM without the table sends every interrupt through
+ * vector 0. Returning M68K_INT_ACK_AUTOVECTOR here instead is what let that
+ * exact bug pass every test and then fail under FS-UAE. */
 static int int_ack(int level)
 {
-    (void)level;
-    return M68K_INT_ACK_AUTOVECTOR;
+    return g_rom[H_ROM_SIZE - 15 + 2 * (level & 7)];
 }
 
 static uint16_t setclr(uint16_t cur, uint16_t val)

@@ -7,6 +7,8 @@
 #include "serial.h"
 #include "kprintf.h"
 #include "stdarg.h"
+#include "irq.h"
+#include "cpu.h"
 
 /* Linker symbols (vbcc adds underscore, so _end becomes __end) */
 extern char _text_start;  /* Start of the kernel image (linker script) */
@@ -148,10 +150,17 @@ void kernel_main(struct mem_entry *memmap)
     /* TODO: initialize display */
     /* TODO: everything else */
 
+    /* Arm the vertical blank interrupt, then prove it arrives: a count that
+     * never moves would otherwise look exactly like a healthy idle loop. */
+    irq_init();
+    cpu_int_enable();
+    while (vbl_count < 50)
+        ;
+    pr_info("Interrupts running: 50 vertical blanks counted\n");
+
     pr_info("Entering idle loop\n");
 
     for (;;) {
-        /* halt until interrupt (if interrupts were enabled) */
+        /* TODO: STOP until the next interrupt instead of spinning */
     }
 }
-
