@@ -8,6 +8,8 @@
 #include "serial.h"
 #include "kprintf.h"
 #include "stdarg.h"
+#include "task.h"
+#include "vector.h"
 #include "irq.h"
 #include "cpu.h"
 
@@ -142,6 +144,18 @@ static void print_boot_device(const struct bootinfo *bi)
         pr_info("Boot device: none\n");
 }
 
+static void hello_task(void *arg)
+{
+    int i;
+
+    for (i = 1; i <= 3; i++) {
+        pr_info("task %s: %d of 3, tick %lu, %lu bytes of stack untouched\n",
+                (const char *)arg, i, sched_ticks(),
+                task_stack_unused(task_current()));
+        task_sleep(25);
+    }
+}
+
 /* The handoff, kept for whoever needs it later - the block layer will want
  * the boot partition. Valid once kernel_main has checked it. */
 const struct bootinfo *bootinfo;
@@ -200,16 +214,19 @@ void kernel_main(struct bootinfo *bi)
 
     /* Arm interrupts. Serial switches from polled to its ring buffer here,
      * so everything above was on the wire before it returned and everything
-     * below is queued. Then prove interrupts arrive: a count that never
-     * moves would otherwise look exactly like a healthy idle loop. */
+     * below is queued. sched_init comes first: it records which CPU this
+     * is, and irq_init installs vectors, which needs to know. */
+    sched_init(BOOTINFO_HAS(bi, cpu_type) ? bi->cpu_type : CPU_68000);
+    pr_info("CPU: 680%02lu%s\n", cpu_type == CPU_68000 ? 0UL : cpu_type * 10,
+            BOOTINFO_HAS(bi, fpu_type) && bi->fpu_type ? " with FPU" : "");
     irq_init();
     cpu_int_enable();
-    while (vbl_count < 50)
-        cpu_idle();
-    pr_info("Interrupts running: 50 vertical blanks counted\n");
 
-    pr_info("Entering idle loop\n");
+    /* A boot-time proof that the whole path works - create, preempt, sleep,
+     * exit, reap - which costs three lines of output and then is gone. */
+    task_create("hello", hello_task, (void *)"hello", 2048, TASK_PRIO_NORMAL);
+    task_create("world", hello_task, (void *)"world", 2048, TASK_PRIO_NORMAL);
 
-    for (;;)
-        cpu_idle();
+    pr_info("Starting scheduler\n");
+    sched_start();
 }

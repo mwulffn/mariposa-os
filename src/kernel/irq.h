@@ -14,8 +14,9 @@
  */
 void irq_init(void);
 
-/* Wrap the fault vectors so a crash flushes serial first. In vectors.s. */
-void trap_init(void);
+/* Wrap the fault vectors so a crash flushes serial first. In vectors.s.
+ * table is vector_table(): address 0 on a 68000, VBR after it. */
+void trap_init(void **table);
 
 /* Vertical blanks seen since boot. Written by the ISR, so volatile. */
 extern volatile unsigned long vbl_count;

@@ -7,27 +7,26 @@
 #include "amiga_hw.h"
 #include "irq.h"
 #include "serial.h"
+#include "vector.h"
 
 /*
- * Level 3 autovector. The 68000 has no VBR - that is a 68010 register - so
- * the vector table is at address 0 and nowhere else, and this is simply
- * where the chip looks. The ROM has already filled the table with handlers
- * that panic, which is the right default: an interrupt nobody installed for
- * should be loud, not silent.
+ * The ROM has already filled the table with handlers that panic, which is
+ * the right default: an interrupt nobody installed for should be loud, not
+ * silent. Installs go through vector_set(), which knows where the table is
+ * on this CPU.
  */
-#define VEC_AUTOVECTOR_1  ((volatile void **)0x64UL)
-#define VEC_AUTOVECTOR_3  ((volatile void **)0x6CUL)
-
-extern void vbl_handler(void);
+extern void tick_handler(void);     /* switch.s */
+extern void yield_handler(void);    /* switch.s */
 
 void irq_init(void)
 {
     /* Before anything can interrupt: from here on a crash flushes the
      * serial ring ahead of the ROM's panic dump. */
-    trap_init();
+    trap_init(vector_table());
 
-    *VEC_AUTOVECTOR_1 = (void *)ser_tbe_handler;
-    *VEC_AUTOVECTOR_3 = (void *)vbl_handler;
+    vector_set(VEC_AUTOVECTOR(1), ser_tbe_handler);
+    vector_set(VEC_AUTOVECTOR(3), tick_handler);
+    vector_set(VEC_TRAP(0), yield_handler);
 
     /*
      * Clear every pending request before enabling anything, or a request

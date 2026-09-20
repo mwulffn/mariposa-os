@@ -19,8 +19,8 @@ MAP     = $(BUILD)/kernel.map
 SYM     = $(BUILD)/kernel.sym
 
 # Sources
-ASRC    = crt0.s libsup.s cpu.s isr.s vectors.s
-CSRC    = kernel.c mem.c serial.c kprintf.c irq.c
+ASRC    = crt0.s libsup.s cpu.s isr.s vectors.s switch.s
+CSRC    = kernel.c mem.c serial.c kprintf.c irq.c vector.c task.c
 
 # Shared with the ROM: hardware definitions and the UART register
 # primitives. The waiting strategy is not shared - see serial_hw.h.

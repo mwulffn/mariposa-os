@@ -28,12 +28,27 @@
 #include "memmap.h"
 
 #define BOOTINFO_MAGIC    0x424F4F54UL  /* 'BOOT' */
-#define BOOTINFO_VERSION  1
+#define BOOTINFO_VERSION  2
 #define BOOTINFO_ADDR     0x003500UL    /* in the ROM's reserved low 16KB */
 
 /* boot_dev_type */
 #define BOOTDEV_NONE      0
 #define BOOTDEV_IDE       1             /* Gayle IDE; boot_dev_unit 0 = master */
+
+/* cpu_type. Ordered, so "has a format word in its exception frames" is
+ * cpu_type >= CPU_68010. */
+#define CPU_68000         0
+#define CPU_68010         1
+#define CPU_68020         2
+#define CPU_68030         3
+#define CPU_68040         4
+#define CPU_68060         6
+
+/* fpu_type */
+#define FPU_NONE          0
+#define FPU_6888X         1             /* 68881 or 68882 coprocessor */
+#define FPU_68040         4             /* on-chip */
+#define FPU_68060         6             /* on-chip */
 
 struct bootinfo {
     unsigned long  magic;               /* BOOTINFO_MAGIC */
@@ -55,6 +70,10 @@ struct bootinfo {
 
     unsigned short rom_version;         /* ROM_VERSION from the ROM header */
     unsigned short reserved0;           /* keeps the struct longword sized */
+
+    /* --- version 2 ------------------------------------------------------ */
+    unsigned short cpu_type;            /* CPU_*; absent means a 68000 */
+    unsigned short fpu_type;            /* FPU_* */
 };
 
 /* True if the writer's struct is long enough to contain `field`. */

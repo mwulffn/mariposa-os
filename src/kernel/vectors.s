@@ -13,6 +13,8 @@
 
         xref    _ser_tbe_isr
         xref    _ser_flush
+        xref    isr_exit
+        xref    _isr_depth
 
 ; ------------------------------------------------------------
 ; ser_tbe_handler - level 1 autovector, serial transmit buffer empty
@@ -26,10 +28,12 @@
 ; ones a call into C can destroy.
 _ser_tbe_handler:
         or.w    #$0700,sr
+        addq.b  #1,_isr_depth
         movem.l d0-d1/a0-a1,-(sp)
         jsr     _ser_tbe_isr
         movem.l (sp)+,d0-d1/a0-a1
-        rte
+        subq.b  #1,_isr_depth
+        jmp     isr_exit            ; every handler leaves this way: switch.s
 
 ; ------------------------------------------------------------
 ; Crash stubs - get queued serial output out before the ROM panics
@@ -84,7 +88,9 @@ crash_common:
         movem.l (sp)+,d0-d1/a0-a1
         rts                         ; into the handler this stub replaced
 
-; void trap_init(void) - wrap vectors 2-11
+; void trap_init(void **table) - wrap vectors 2-11
+;
+; table is where the vector table is: 0 on a 68000, VBR on anything later.
 ;
 ; Call after ser_init. Idempotent: a second call would otherwise save the
 ; stubs as "the old handlers" and chain them to themselves for ever.
@@ -95,7 +101,8 @@ _trap_init:
         st      (a0)
 
         move.l  a2,-(sp)
-        lea     FIRST_VEC*4,a0      ; vector slots
+        move.l  8(sp),a0            ; table, past the saved A2
+        lea     FIRST_VEC*4(a0),a0  ; vector slots
         lea     old_vectors(pc),a1
         lea     crash_stubs(pc),a2
         moveq   #NUM_VECS-1,d0

@@ -152,6 +152,11 @@ h_result h_call(uint32_t pc);
  * guest memory for the result rather than the status. */
 h_result h_run(uint32_t pc);
 
+/* Carry on from wherever the last h_run stopped, for another cycle budget.
+ * For code that never returns and is observed in slices - a scheduler. */
+h_result h_resume(void);
+uint32_t h_get_pc(void);
+
 /* Cycle budget for a single call. Generous by default; lower it in a test
  * that is specifically checking something terminates. */
 void h_set_cycle_budget(uint64_t cycles);
@@ -268,6 +273,19 @@ int h_irq_level(void);
  * that want a level without inventing a source for it. Cleared by h_reset
  * and overridden by the next INTENA/INTREQ write. */
 void h_irq_force(int level);
+
+/* Raise VERTB every `cycles` CPU cycles, 0 to stop. Off after h_reset. The
+ * period is not 50Hz and is not meant to be: a scheduler test wants many
+ * ticks inside its cycle budget, landing wherever they land. */
+void h_vbl_every(uint64_t cycles);
+
+/* Swap the CPU core: 68000, 68010, 68020, 68030 or 68040 (the last three as
+ * their EC variants, which keep the 24-bit bus this machine model has).
+ * Resets the CPU. h_reset always goes back to the 68000, so a test that
+ * wants another core says so after it, and cannot leak it to the next test.
+ * What this buys is the exception frame: six bytes on a 68000, eight with a
+ * format word on everything later. */
+void h_set_cpu(int model);
 
 /* The 68000 status register. The interrupt mask is bits 8-10: h_reset leaves
  * SR at $2700 (all interrupts masked, as ROM code runs), so a test that wants

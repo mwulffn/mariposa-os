@@ -27,6 +27,9 @@
 #define BI_PART_BLOCKS  0x24
 #define BI_ROM_VERSION  0x28    /* short */
 #define BI_V1_SIZE      0x2C
+#define BI_CPU_TYPE     0x2C    /* short, version 2 */
+#define BI_FPU_TYPE     0x2E    /* short, version 2 */
+#define BI_V2_SIZE      0x30
 
 #define KERNEL_BASE     0x200000u
 
@@ -63,8 +66,8 @@ static void t_bootinfo_layout(void)
 
     CHECK_U32(BOOTINFO_ADDR, bi);
     CHECK_U32(0x424F4F54u, h_peek32(bi + BI_MAGIC));
-    CHECK_U32(1, h_peek16(bi + BI_VERSION));
-    CHECK_U32(BI_V1_SIZE, h_peek16(bi + BI_SIZE));
+    CHECK_U32(2, h_peek16(bi + BI_VERSION));
+    CHECK_U32(BI_V2_SIZE, h_peek16(bi + BI_SIZE));
     CHECK_U32(h_sym("MEMMAP_TABLE"), h_peek32(bi + BI_MEMMAP));
     CHECK_U32(0xFC1000, h_peek32(bi + BI_ROM_PANIC));
     CHECK_U32(KERNEL_BASE, h_peek32(bi + BI_KERNEL_BASE));
@@ -75,7 +78,56 @@ static void t_bootinfo_layout(void)
     CHECK_U32(0x1234, h_peek32(bi + BI_PART_LBA));
     CHECK_U32(0x56789, h_peek32(bi + BI_PART_BLOCKS));
     CHECK_U32(h_peek16(H_ROM_BASE + 12), h_peek16(bi + BI_ROM_VERSION));
+    CHECK_U32(0, h_peek16(bi + BI_CPU_TYPE));           /* CPU_68000 */
+    CHECK_U32(0, h_peek16(bi + BI_FPU_TYPE));           /* FPU_NONE */
 }
+
+/* --- CPU detection ---------------------------------------------------------
+ *
+ * Each probe is an instruction the next CPU up added, and on the wrong CPU
+ * it traps - through a frame whose shape is one of the things being
+ * detected. So this is run on every core Musashi has. There is no 68060
+ * core; that branch is reasoned, not tested.
+ */
+static void detect_on(int model, uint32_t want_cpu)
+{
+    uint32_t illegal, line_f, d0, sp;
+    h_result r;
+
+    h_reset();
+    h_set_cpu(model);
+    h_begin_call();
+    r = h_call(h_sym("install_exception_vectors"));
+    CHECK_CALL(r);
+    illegal = h_peek32(0x10);
+    line_f  = h_peek32(0x2C);
+
+    h_begin_call();
+    h_set_d(2, 0xD2D2D2D2u);
+    h_set_a(5, 0x00A5A5A4u);
+    sp = h_get_sp();
+    r = h_call(h_sym("_rom_cpu_detect"));
+    CHECK_CALL(r);
+    d0 = h_get_d(0);
+
+    CHECK(( d0 & 0xFFFF) == want_cpu,
+          "on a %d: detected CPU type %u, want %u", model, d0 & 0xFFFF, want_cpu);
+    if (model < 68020)
+        CHECK_U32(0, d0 >> 16);                         /* no FPU interface */
+
+    /* It borrowed two vectors and the stack pointer; all three go back. */
+    CHECK_U32(illegal, h_peek32(0x10));
+    CHECK_U32(line_f,  h_peek32(0x2C));
+    CHECK_U32(sp, h_get_sp());
+    CHECK_U32(0xD2D2D2D2u, h_get_d(2));
+    CHECK_U32(0x00A5A5A4u, h_get_a(5));
+}
+
+static void t_cpu_detect_68000(void) { detect_on(68000, 0); }
+static void t_cpu_detect_68010(void) { detect_on(68010, 1); }
+static void t_cpu_detect_68020(void) { detect_on(68020, 2); }
+static void t_cpu_detect_68030(void) { detect_on(68030, 3); }
+static void t_cpu_detect_68040(void) { detect_on(68040, 4); }
 
 /* It lives in the low 16KB the map already marks reserved, and clear of its
  * neighbours: the memory map below it, the kernel's chip arena above. */
@@ -170,6 +222,11 @@ static void t_kernel_tolerates_a_shorter_struct(void)
 static const test_case tests[] = {
     { "bootinfo_layout",        t_bootinfo_layout,                  NULL },
     { "bootinfo_placement",     t_bootinfo_is_out_of_the_way,       NULL },
+    { "cpu_detect_68000",       t_cpu_detect_68000,                 NULL },
+    { "cpu_detect_68010",       t_cpu_detect_68010,                 NULL },
+    { "cpu_detect_68020",       t_cpu_detect_68020,                 NULL },
+    { "cpu_detect_68030",       t_cpu_detect_68030,                 NULL },
+    { "cpu_detect_68040",       t_cpu_detect_68040,                 NULL },
     { "kernel_reads_handoff",   t_kernel_reads_the_handoff,         NULL },
     { "kernel_rejects_bad",     t_kernel_rejects_a_bad_handoff,     NULL },
     { "kernel_shorter_struct",  t_kernel_tolerates_a_shorter_struct, NULL },

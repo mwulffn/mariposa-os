@@ -208,6 +208,21 @@ right to left.
 This is not a copy built for the tests. `kser.*` runs the interrupt-driven
 serial driver out of the image that boots.
 
+`task.*` goes one further and runs a scheduler: the task bodies are
+`tests/guest/ktasks.s`, position-independent assembly that reaches the kernel
+through function pointers the test hands it and reports progress through
+counters the test reads. `h_vbl_every(cycles)` supplies the tick - at a
+period chosen to land awkwardly, nothing to do with 50Hz - and `h_resume()`
+lets a test look at a machine that never returns, one slice at a time.
+
+`h_set_cpu(68020)` swaps the CPU core, and every `task.*` test runs on the
+68000 and again on the 68020, because the exception frame differs - six
+bytes against eight - and `task_create` has to fabricate one by hand.
+`boot.cpu_detect_*` runs the ROM's detection on all five cores Musashi has.
+A test cannot call into the kernel from outside once the scheduler is
+running: an idle machine is sitting in `STOP`, and the call would run on
+some task's context. Probe from inside instead, as `body_sampler` does.
+
 Two pieces of the UART model exist for it. `h_serial_overruns()` counts
 writes to `SERDAT` while TBE was clear - each destroys a byte on the real
 chip, and the capture cannot show it because it records every write.

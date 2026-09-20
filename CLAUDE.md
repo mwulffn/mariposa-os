@@ -84,6 +84,7 @@ src/rom/                      - 256KB ROM, pure 68000 assembly
   ide.c                       - Gayle register map + the boot device table
   ide_glue.s                  - Register ABI shim between callers and ide.c
   rom.h                       - Interface between the ROM's C modules
+  cpu_detect.s                - Which 680x0 and FPU, by probing; reported in bootinfo
   disk.c                      - Boot path across the disk: what to read, what to say
   disk_glue.s                 - Register ABI shim between callers and disk.c
   hardware.i                  - Hardware definitions and the low-memory map
@@ -101,8 +102,12 @@ src/shared/                   - Compiled into BOTH the ROM and the kernel
 src/kernel/
   crt0.s                      - Startup stub, receives control from the ROM
   cpu.{s,h}                   - SR primitives, CRITICAL_ENTER/EXIT, cpu_idle
-  isr.s                       - Interrupt service routines (vertical blank)
+  isr.s                       - Minimal vertical-blank ISR; the tests' reference handler.
+                                The kernel itself installs switch.s's tick_handler
   vectors.s                   - Stubs that call C: serial TBE ISR, crash flush
+  switch.s                    - Context switch: tick handler, isr_exit, TRAP #0 yield
+  task.{c,h}                  - Tasks, priorities, sleep, wait queues, exit and reaping
+  vector.{c,h}                - cpu_type and vector_set(): the table is at VBR on 68010+
   irq.{c,h}                   - Vector install and INTENA setup
   libsup.s                    - 32-bit divide/modulo helpers vbcc calls
   kernel.c                    - Kernel entry point
@@ -125,6 +130,8 @@ tests/                        - Headless 68000 test harness (see docs/testing.md
   test_kserial.c              - src/kernel/serial.c, run out of the real SYSTEM.BIN
   test_boot.c                 - bootinfo layout, and entering the real kernel with it
   test_kmem.c                 - src/kernel/mem.c against hand-built memory maps
+  test_task.c                 - The scheduler, every test on a 68000 and a 68020 core
+  guest/ktasks.s              - Bodies of the tasks the scheduler tests run
   test_disk.c                 - ata.c/ide.c, rdb.c, fat16.c, disk.c
   mksym.py                    - vasm listing -> flat symbol table
   mkdisk.py                   - Generates the RDB + FAT16 test disk images
@@ -138,7 +145,7 @@ test_*.py                     - FS-UAE integration scripts
 ## Testing
 
 ```bash
-make test                      # headless, 216 tests, ~0.3s, no emulator needed
+make test                      # headless, 251 tests, ~0.3s, no emulator needed
 make test FILTER=rom.panic     # narrow to one group while iterating
 ```
 
@@ -155,8 +162,9 @@ code is the verdict: 0 pass, 1 test failed, 2 harness error.
 | `zorro.*` | `autoconfig.c` against a modelled Zorro II card |
 | `irq.*` | INTENA/INTREQ, interrupt levels, autovector dispatch, UART TBE |
 | `cpu.*` | `src/kernel/cpu.s` SR primitives, `cpu_idle`, and `isr.s` vertical-blank handler |
-| `boot.*` | `bootinfo.h` layout as an ABI; the real kernel entered with good, bad and short handoffs |
+| `boot.*` | CPU detection on five cores; `bootinfo.h` layout as an ABI; the real kernel entered with good, bad and short handoffs |
 | `kmem.*` | `src/kernel/mem.c`: fit policy, coalescing, bad frees, ownership, `mem_check`, random churn |
+| `task.*` | `task.c` + `switch.s`: yield, preemption, priorities, sleep, wait queues, exit, stack overflow - each on two CPU cores |
 | `kser.*` | `src/kernel/serial.c` + `vectors.s`: ring buffer, TBE ISR, full ring, crash flush |
 | `disk.*` | `ata.c`, `ide.c`, `rdb.c`, `fat16.c` against a generated RDB + FAT16 image |
 
@@ -243,10 +251,8 @@ instead, and `mem.stack_*` pins it.
 **Next up**
 
 - Interrupts are armed: `kernel_main` calls `irq_init` and
-  `cpu_int_enable`, and waits for 50 vertical blanks before reporting, so a
-  dead interrupt path hangs visibly at boot. `src/kernel/cpu.s` has the four
-  SR wrappers and `cpu.h` the critical-section macros; `src/kernel/isr.s`
-  has the vertical-blank handler. The idle loop is `cpu_idle()` (STOP).
+  `cpu_int_enable`. `src/kernel/cpu.s` has the SR wrappers and `cpu_idle()`
+  (STOP), `cpu.h` the critical-section macros.
 - Serial transmit is interrupt-driven per `docs/serial_design.md`, which was
   rewritten to match: the first draft's enable-TBE-on-putc scheme deadlocks
   after the first burst. `make test` now builds the kernel too, because
@@ -258,6 +264,13 @@ instead, and `mem.stack_*` pins it.
   enters the real kernel with good, bad and truncated structs.
 - The allocator is a free list with coalescing per `docs/mem_design.md`,
   whose status block lists where the code deliberately differs.
+- Tasks and a preemptive scheduler per `docs/task_design.md`: kernel
+  threads, four priorities, the 50Hz tick, sleep and wait queues. Built to
+  run unchanged up to a 68060 - the ROM detects the CPU (`bootinfo` v2),
+  vectors are installed through `vector_set()`, and only
+  `build_initial_frame` knows an exception frame's layout. Verified under
+  FS-UAE with `cpu = 68000` and `cpu = 68020`. `kernel_main` ends in
+  `sched_start()`, which turns the boot context into the idle task.
 - **Build gotcha:** macOS ships make 3.81, which compares timestamps to the
   second. Two builds inside one second leave a stale object in the link -
   it bit a scripted edit-build-test loop here, not normal use. When
@@ -265,10 +278,13 @@ instead, and `mem.stack_*` pins it.
   on every header now (vbcc has no -MD), so a changed struct in
   `src/shared` rebuilds both the ROM and the kernel.
 - Keyboard input (CIA-A), level 2 PORTS interrupt. Needs the handshake pulse.
-- Serial receive: an RBF-driven ring at level 5, once something wants input.
+- Input, now that a task can block waiting for it: keyboard (below) or
+  serial receive, an RBF-driven ring at level 5, with a small console task.
+- A sleeping mutex, with its first user. Tasks sleeping on a full serial
+  ring instead of polling. FPU context (the slot in `struct task` is
+  reserved). All listed in `docs/task_design.md`.
 - Block I/O and FAT16 in the kernel. The ROM's copies are boot-time only, so
   once the kernel is running it cannot read a disk at all.
-- Tasks and a scheduler, once interrupts and the allocator are in place.
 - Debugger: breakpoints, single-step, disassembly (see `docs/rom_design.md`).
 - A tiling workspace: copper-banded screens, blitter text, focus routing.
 

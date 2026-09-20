@@ -305,6 +305,7 @@ struct bootinfo *rom_build_bootinfo(unsigned long part_lba,
                                     void (*panic)(void))
 {
     struct bootinfo *bi = (struct bootinfo *)BOOTINFO_ADDR;
+    unsigned long cpu;
 
     bi->magic            = BOOTINFO_MAGIC;
     bi->version          = BOOTINFO_VERSION;
@@ -320,6 +321,10 @@ struct bootinfo *rom_build_bootinfo(unsigned long part_lba,
     bi->boot_part_blocks = part_blocks;
     bi->rom_version      = *(const unsigned short *)0xFC000CUL;
     bi->reserved0        = 0;
+
+    cpu = rom_cpu_detect();
+    bi->cpu_type         = (unsigned short)(cpu & 0xFFFF);
+    bi->fpu_type         = (unsigned short)(cpu >> 16);
     return bi;
 }
 

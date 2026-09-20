@@ -23,6 +23,7 @@ extern const test_suite cpu_suite;
 extern const test_suite kserial_suite;
 extern const test_suite boot_suite;
 extern const test_suite kmem_suite;
+extern const test_suite task_suite;
 
 /*
  * Position-independent kernel assembly, assembled to origin zero and loaded
@@ -34,6 +35,7 @@ static const struct { const char *name; uint32_t base; } modules[] = {
     { "libsup", 0x00100000u },
     { "cpu",    0x00110000u },
     { "isr",    0x00120000u },
+    { "ktasks", 0x00130000u },
 };
 
 /*
@@ -98,7 +100,8 @@ int main(int argc, char **argv)
                                       vector_suite, irq_suite, cpu_suite,
                                       memory_suite, zorro_suite,
                                       disk_suite, kserial_suite,
-                                      boot_suite, kmem_suite };
+                                      boot_suite, kmem_suite,
+                                      task_suite };
         rc = run_suites(suites, sizeof suites / sizeof suites[0], filter);
     }
 

@@ -9,6 +9,7 @@
 
 #include "kprintf.h"
 #include "serial.h"
+#include "cpu.h"
 #include "stdarg.h"
 
 extern void (*rom_panic)(void);
@@ -248,9 +249,20 @@ int kprintf(int level, const char *fmt, ...)
     o.size = 0;
     o.pos = 0;
 
+    /*
+     * One call, one critical section. Output goes out a character at a
+     * time, so without this two tasks printing at once interleave mid-line
+     * - "aBBaaaBBaa" is what the test saw. Masking is affordable because
+     * ser_putc only queues; it is a real wait only when the ring is full,
+     * and then the caller was going to wait regardless. A sleeping mutex
+     * would be kinder to interrupt latency and cannot be used from a
+     * handler, which kprintf has to be.
+     */
+    CRITICAL_ENTER();
     va_start(ap, fmt);
     ret = do_format(&o, fmt, ap);
     va_end(ap);
+    CRITICAL_EXIT();
 
     return ret;
 }

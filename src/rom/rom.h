@@ -19,6 +19,9 @@ unsigned long rom_vsprintf(const char *fmt, const unsigned long *args);
 void rom_printf(const char *fmt, const unsigned long *args);
 
 /* serial.c */
+/* cpu_detect.s: low word CPU_*, high word FPU_*, from bootinfo.h. */
+unsigned long rom_cpu_detect(void);
+
 void rom_serial_init(void);
 void rom_serial_put_char(unsigned long c);
 void rom_serial_put_string(const char *s);

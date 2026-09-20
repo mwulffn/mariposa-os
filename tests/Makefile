@@ -17,7 +17,10 @@ ASM        ?= vasmm68k_mot
 # standalone and loaded by the harness: the maths helpers, and now the
 # interrupt primitives and the ISRs.
 MODULES     = libsup cpu isr
-MODULE_SYMS = $(MODULES:%=$(BUILD)/%.sym)
+# Guest-side code that exists only for the tests: the bodies of the tasks the
+# scheduler tests run. Same treatment, different directory.
+GUEST       = ktasks
+MODULE_SYMS = $(MODULES:%=$(BUILD)/%.sym) $(GUEST:%=$(BUILD)/%.sym)
 
 BUILD  = build
 TARGET = $(BUILD)/run-tests
@@ -37,7 +40,7 @@ LDLIBS         = -lm
 
 TEST_SRC = main.c protocol.c harness.c test_format.c test_memory.c test_zorro.c \
            test_vectors.c test_irq.c test_disk.c test_libsup.c test_cpu.c \
-           test_kserial.c test_boot.c test_kmem.c
+           test_kserial.c test_boot.c test_kmem.c test_task.c
 TEST_OBJ = $(TEST_SRC:%.c=$(BUILD)/%.o)
 
 MUSASHI_OBJ = $(BUILD)/m68kcpu.o $(BUILD)/m68kdasm.o $(BUILD)/m68kops.o \
@@ -72,6 +75,10 @@ $(BUILD)/test_disk.o: $(DISK_STAMP)
 # Assembled at origin zero - the harness loads each one elsewhere and
 # biases its symbols to match.
 $(BUILD)/%.sym: ../src/kernel/%.s mksym.py | $(BUILD)
+	$(ASM) -Fbin -m68000 -no-opt -o $(BUILD)/$*.bin -L $(BUILD)/$*.lst $<
+	@python3 mksym.py $(BUILD)/$*.lst $@
+
+$(BUILD)/%.sym: guest/%.s mksym.py | $(BUILD)
 	$(ASM) -Fbin -m68000 -no-opt -o $(BUILD)/$*.bin -L $(BUILD)/$*.lst $<
 	@python3 mksym.py $(BUILD)/$*.lst $@
 

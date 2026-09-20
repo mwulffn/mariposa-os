@@ -21,6 +21,7 @@
         xdef    _cpu_int_disable
         xdef    _cpu_int_enable
         xdef    _cpu_idle
+        xdef    _cpu_vbr_get
 
 ; unsigned long cpu_sr_get(void) - current SR, zero extended
 ;
@@ -69,4 +70,13 @@ _cpu_int_enable:
 ; that is waiting on an interrupt - never inside a critical section.
 _cpu_idle:
         stop    #$2000
+        rts
+
+; unsigned long cpu_vbr_get(void) - 68010 and later ONLY
+;
+; MOVEC does not exist on a 68000 and takes an illegal instruction trap
+; there; vector.c checks cpu_type before calling. Spelled dc.w because this
+; file is assembled -m68000.
+_cpu_vbr_get:
+        dc.w    $4E7A,$0801             ; movec vbr,d0
         rts

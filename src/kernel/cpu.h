@@ -24,6 +24,10 @@ void          cpu_int_enable(void);
  * inside a critical section, since it lowers the mask to 0. */
 void          cpu_idle(void);
 
+/* The vector base register. 68010 and later only - it is an illegal
+ * instruction on a 68000. Use vector_set(), which knows. */
+unsigned long cpu_vbr_get(void);
+
 /*
  * Critical sections. Declares its own saved SR, so sections nest correctly
  * and an inner one cannot re-enable interrupts an outer one had masked.

@@ -110,6 +110,29 @@ static void serial_tx_tick(void)
     }
 }
 
+/* --- vertical blank --------------------------------------------------------
+ *
+ * Off unless a test asks. The period is in CPU cycles and deliberately has
+ * nothing to do with 50Hz: a scheduler test wants hundreds of ticks inside
+ * its cycle budget, and wants them to land at awkward places. */
+static uint64_t g_vbl_period;
+static uint64_t g_vbl_next;
+
+static void vbl_tick(void)
+{
+    if (g_vbl_period && g_cycles >= g_vbl_next) {
+        g_vbl_next = g_cycles + g_vbl_period;
+        g_intreq |= H_INTF_VERTB;
+        irq_update();
+    }
+}
+
+void h_vbl_every(uint64_t cycles)
+{
+    g_vbl_period = cycles;
+    g_vbl_next   = g_cycles + cycles;
+}
+
 /* ------------------------------------------------------------- guest access */
 
 /* Host pointer for a guest address, or NULL if unmapped. Does not fault -
@@ -833,7 +856,7 @@ uint32_t h_sym(const char *name)
 
 /* ------------------------------------------------------------------ modules */
 
-#define MAX_MODULES 4
+#define MAX_MODULES 8
 
 typedef struct { uint8_t *data; size_t len; uint32_t addr; } module_t;
 
@@ -976,6 +999,35 @@ static const char *vector_name(int v)
     return "UNKNOWN";
 }
 
+uint32_t h_get_pc(void) { return m68k_get_reg(NULL, M68K_REG_PC); }
+
+h_result h_resume(void)
+{
+    return h_run(m68k_get_reg(NULL, M68K_REG_PC));
+}
+
+/* Swap the CPU core. Musashi wants a reset after a type change, and reset
+ * reloads SSP and PC from vectors 0 and 1, which here are RAM - so the
+ * caller gets the same "SR $2700, registers unset" state h_reset leaves. */
+static unsigned g_cpu_type = M68K_CPU_TYPE_68000;
+
+void h_set_cpu(int model)
+{
+    switch (model) {
+        case 68000: g_cpu_type = M68K_CPU_TYPE_68000; break;
+        case 68010: g_cpu_type = M68K_CPU_TYPE_68010; break;
+        case 68020: g_cpu_type = M68K_CPU_TYPE_68EC020; break;  /* 24-bit bus */
+        case 68030: g_cpu_type = M68K_CPU_TYPE_68EC030; break;
+        case 68040: g_cpu_type = M68K_CPU_TYPE_68EC040; break;
+        default:
+            fprintf(stderr, "harness: no CPU model %d\n", model);
+            exit(2);
+    }
+    m68k_set_cpu_type(g_cpu_type);
+    m68k_pulse_reset();
+    m68k_set_irq(0);
+}
+
 void h_begin_call(void) { m68k_set_reg(M68K_REG_SP, H_STACK_TOP); }
 
 void h_push32(uint32_t v)
@@ -1031,6 +1083,7 @@ h_result h_run(uint32_t pc)
             r.cycles += n;
             g_cycles += n;
             serial_tx_tick();
+            vbl_tick();
         }
     }
 
@@ -1084,6 +1137,7 @@ void h_reset(void)
     g_zorro_done = g_zorro_shutup = 0;
     g_zorro_base_written = 0;
     g_cycles = 0;
+    g_vbl_period = 0;
     g_tbe_at = g_tsre_at = 0;
     g_tbe_cycles  = 64;
     g_tsre_cycles = 128;
