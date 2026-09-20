@@ -153,7 +153,11 @@ ROM_END         equ $FFFFFF
 ; Our memory map (follows docs/rom_design.md)
 ; ============================================================
 REG_DUMP_AREA   equ $000400         ; Register dump (80 bytes)
-DBG_STACK       equ $00084F         ; Debugger stack top
+; Debugger stack, growing down from here into the gap above the register
+; dump. Exclusive: the first push lands at $84C, so it never touches
+; DBG_CMD_BUF. This was $84F - an odd address, which on a 68000 faults on
+; the first word pushed - and nothing used it, so nothing found out.
+DBG_STACK       equ $000850         ; Debugger stack top (grows down to $450)
 DBG_CMD_BUF     equ $000850         ; Command buffer (128 bytes)
 DBG_BUF_IDX     equ $0008D0         ; Command buffer index
 DBG_LAST_ADDR   equ $0008D4         ; Last examined address

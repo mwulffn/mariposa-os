@@ -53,9 +53,6 @@ panic:
     ; Save registers immediately before we trash anything
     movem.l d0-d7/a0-a6,saved_regs
 
-    ; Save A7 (stack pointer) - it's not in movem range
-    move.l  sp,saved_a7
-
     ; Walk to the SR/PC pair inside the exception frame. Group 0 faults
     ; push SSW, access address and IR ahead of it; everything else puts
     ; SR/PC at the top of the frame.
@@ -68,6 +65,14 @@ panic:
 
     ; Save faulting PC
     move.l  2(a0),saved_pc
+
+    ; Save A7 - not in movem range, and not the SP we are standing on. That
+    ; one points inside the exception frame the CPU just pushed. What the
+    ; faulting code had in A7 is the far side of the whole frame: PC ends it
+    ; at (a0)+6 whichever group it was, since a0 already skipped the group 0
+    ; extras. 'r' reports this, and 'g' resumes onto it.
+    lea     6(a0),a1
+    move.l  a1,saved_a7
 
     ; Output to serial port
     bsr     panic_serial_output

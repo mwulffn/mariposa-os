@@ -255,8 +255,11 @@ instead, and `mem.stack_*` pins it.
   the first partition is reachable. Carried over unchanged from the assembly
   during the C conversion; fixing it needs a test image whose partition list
   is not at block 1.
-- The debugger's `g` does not restore A7 - it RTEs onto the debugger's own
-  stack. `DBG_STACK` is defined, unused, and at an odd address.
+- `debugger_entry` sets `saved_pc` to itself, so `g` after a deliberate
+  break re-enters the debugger instead of returning to whoever broke in.
+  It is entered by `jmp` from `bootstrap.s` and by `jsr` through the
+  kernel's `rom_panic` pointer, and those two disagree about whether there
+  is a return address to resume to. `g` from a real fault is unaffected.
 - A fresh clone cannot `make run`: nothing creates `harddrives/boot.hdf`.
 - `configure_zorro_ii` advances its slot pointer by $10000 per card. Every
   Zorro II board answers at $E80000 in turn, so a second card would be looked

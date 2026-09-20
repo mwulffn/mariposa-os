@@ -31,6 +31,14 @@ debugger_entry:
 ; ============================================================
 ; Displays prompt, reads commands, dispatches to handlers
 debugger_main:
+    ; Move onto the debugger's own stack. Both ways in - the boot entry
+    ; above and panic's jump - have already saved A7, so the interrupted
+    ; stack is recorded and we no longer have to stand on it. That matters
+    ; most in the case the debugger exists for: a kernel that died by
+    ; running its stack into something, where continuing to push onto it
+    ; would take the debugger down too.
+    move.l  #DBG_STACK,sp
+
     ; Initialize debugger state
     clr.l   DBG_BUF_IDX
     clr.l   DBG_LAST_ADDR
@@ -591,8 +599,16 @@ cmd_go:
     lea     .msg(pc),a0
     bsr     serial_put_string
 
-    ; Restore registers and continue
-    ; Build RTE frame on stack
+    ; Back onto the interrupted code's own stack before building the frame.
+    ; This used to build it wherever the debugger's SP happened to be and
+    ; RTE from there, so resuming handed the interrupted code the debugger's
+    ; stack pointer and A7 was never restored at all.
+    ;
+    ; The frame is written below saved_a7 and consumed by the RTE, which
+    ; leaves SP exactly at saved_a7.
+    move.l  saved_a7,sp
+
+    ; Build RTE frame: SR at the lower address, PC above it
     move.l  saved_pc,-(sp)               ; PC
     move.w  saved_sr,-(sp)               ; SR
 

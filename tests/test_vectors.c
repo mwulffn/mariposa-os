@@ -9,6 +9,8 @@
  *   - panic decoded SR and PC at a fixed offset, which is wrong for bus and
  *     address error: those push an 8-byte prologue ahead of the pair.
  */
+#include <stdio.h>
+
 #include "protocol.h"
 
 /* --- ROM image ---------------------------------------------------------- */
@@ -142,6 +144,105 @@ static void t_panic_group0_frame(void)
     CHECK_U32(FAKE_SR, h_peek16(h_sym("saved_sr")));
 }
 
+/*
+ * A7 as the faulting code had it, not the SP inside the frame the CPU just
+ * pushed. The offset differs by group: 6 bytes of SR+PC for an ordinary
+ * fault, 14 once a bus or address error has added SSW, access address and
+ * IR ahead of them.
+ */
+static void t_panic_saves_faulting_sp(void)
+{
+    run_panic("panic_with_msg", 0);
+    CHECK_U32(H_STACK_TOP - 64 + 6, h_peek32(h_sym("saved_a7")));
+}
+
+static void t_panic_group0_saves_faulting_sp(void)
+{
+    run_panic("panic_with_msg_group0", 1);
+    CHECK_U32(H_STACK_TOP - 64 + 14, h_peek32(h_sym("saved_a7")));
+}
+
+/*
+ * The debugger runs on DBG_STACK, not on the stack of whatever just died.
+ * The address was also odd ($84F), which would have faulted on the first
+ * word pushed had anything ever used it.
+ */
+static void t_debugger_stack_is_word_aligned(void)
+{
+    CHECK((h_sym("DBG_STACK") & 1) == 0,
+          "DBG_STACK $%X is odd - the first push would address-error",
+          h_sym("DBG_STACK"));
+}
+
+static void t_debugger_runs_on_its_own_stack(void)
+{
+    uint32_t top = h_sym("DBG_STACK");
+    uint32_t sp;
+
+    run_panic("panic_with_msg", 0);
+    sp = h_get_sp();
+
+    CHECK(sp <= top && sp > top - 512,
+          "debugger SP $%X is not on DBG_STACK ($%X, growing down)",
+          sp, top);
+}
+
+/* --- resuming with 'g' ---------------------------------------------------
+ *
+ * cmd_go built its RTE frame wherever the debugger's SP happened to be and
+ * RTE'd from there, so A7 was never restored: the resumed code carried on
+ * with the debugger's stack pointer. Now that the debugger has a stack of
+ * its own that is not a near miss but a different region entirely.
+ *
+ * Resuming to H_RETURN_ADDR lets the harness catch the RTE as a normal
+ * return, so the state it lands in can be inspected.
+ */
+static void t_go_restores_sp_and_registers(void)
+{
+    uint32_t resume_sp = H_STACK_TOP - 512;
+    h_result r;
+
+    h_poke8(h_sym("DBG_CMD_BUF"), 'g');
+    h_poke8(h_sym("DBG_CMD_BUF") + 1, 0);
+
+    h_poke32(h_sym("saved_pc"), H_RETURN_ADDR);
+    h_poke16(h_sym("saved_sr"), 0x2000);
+    h_poke32(h_sym("saved_a7"), resume_sp);
+    h_poke32(h_sym("saved_d0"), 0xCAFEF00Du);
+    h_poke32(h_sym("saved_a6"), 0x00ABCDE0u);
+
+    h_begin_call();
+    r = h_call(h_sym("cmd_go"));
+    CHECK_CALL(r);
+
+    CHECK_U32(resume_sp, h_get_sp());
+    CHECK_U32(0xCAFEF00Du, h_get_d(0));
+    CHECK_U32(0x00ABCDE0u, h_get_a(6));
+}
+
+/* 'g <addr>' overrides the PC but must still land on the saved stack. */
+static void t_go_with_address_restores_sp(void)
+{
+    uint32_t resume_sp = H_STACK_TOP - 512;
+    char cmd[16];
+    int i;
+    h_result r;
+
+    snprintf(cmd, sizeof cmd, "g %X", H_RETURN_ADDR);
+    for (i = 0; cmd[i]; i++)
+        h_poke8(h_sym("DBG_CMD_BUF") + (uint32_t)i, (uint8_t)cmd[i]);
+    h_poke8(h_sym("DBG_CMD_BUF") + (uint32_t)i, 0);
+
+    h_poke32(h_sym("saved_pc"), 0xDEADBEEFu);   /* must be overridden */
+    h_poke16(h_sym("saved_sr"), 0x2000);
+    h_poke32(h_sym("saved_a7"), resume_sp);
+
+    h_begin_call();
+    r = h_call(h_sym("cmd_go"));
+    CHECK_CALL(r);
+    CHECK_U32(resume_sp, h_get_sp());
+}
+
 static void t_panic_reports_pc_on_serial(void)
 {
     run_panic("panic_with_msg", 0);
@@ -165,6 +266,12 @@ static const test_case tests[] = {
     { "leave_reset_alone",          t_vectors_leave_reset_alone,  NULL },
     { "panic_group1_frame",         t_panic_group1_frame,         NULL },
     { "panic_group0_frame",         t_panic_group0_frame,         NULL },
+    { "panic_saves_faulting_sp",    t_panic_saves_faulting_sp,    NULL },
+    { "panic_group0_faulting_sp",   t_panic_group0_saves_faulting_sp, NULL },
+    { "dbg_stack_aligned",          t_debugger_stack_is_word_aligned, NULL },
+    { "dbg_own_stack",              t_debugger_runs_on_its_own_stack, NULL },
+    { "go_restores_sp",             t_go_restores_sp_and_registers, NULL },
+    { "go_addr_restores_sp",        t_go_with_address_restores_sp, NULL },
     { "panic_reports_pc",           t_panic_reports_pc_on_serial, NULL },
     { "panic_group0_reports_pc",    t_panic_group0_reports_pc_on_serial, NULL },
 };
