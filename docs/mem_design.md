@@ -1,12 +1,34 @@
 # Memory System Design
 
-> **Status.** This is the target design. `src/kernel/mem.c` today is a bump
-> allocator with no `free()` at all: two heaps, a pointer each, and
-> `mem_alloc` walks it forward. Everything below - free lists, coalescing,
-> best-fit for chip and first-fit for fast - is still to be built.
+> **Status.** Implemented in `src/kernel/mem.c` and pinned by the `kmem.*`
+> tests, which run it out of the real kernel image. Where the code differs
+> from the text below it is deliberate:
 >
-> The allocator is pure logic with no hardware dependency, so it is a good
-> candidate for host-compiled unit tests when it is written.
+> - **The free list is doubly linked**, not singly. Coalescing unlinks
+>   arbitrary blocks, and with one link that is a walk of the whole list for
+>   every free. The links live in the free block's own payload, so they cost
+>   a used block nothing.
+> - **There is a third pool, slow RAM** (`$C00000`), first-fit like fast.
+>   `ALLOC_ANY` tries fast, then slow, then chip.
+> - **A pool can span several regions** of the memory map. Each is closed by
+>   a zero-length marker block, so coalescing never crosses between them.
+> - **The API is `mem_alloc(size, flags)` / `mem_free(ptr)`**, with
+>   `kmalloc`, `kfree`, `chip_alloc`, `chip_free` and `chip_largest_free` as
+>   macros over it. `mem_free` finds the pool itself.
+> - **`mem_free` refuses bad pointers** - outside every pool, misaligned,
+>   mid-block, freed twice, or with a trampled header - and returns -1
+>   without touching the heap. The pool lookup happens before the header is
+>   read, so a wild pointer is never dereferenced.
+> - **`mem_check()`** walks every pool and verifies it. The header's magic
+>   sits directly after the previous block's payload, so it doubles as an
+>   overrun canary.
+> - **Ownership is an opaque tag**: `mem_alloc_tagged(size, flags, owner)`
+>   and `mem_free_owner(owner)`. It becomes a task pointer once tasks exist;
+>   0 is the kernel and is never bulk-freed.
+> - Every entry point is a critical section, per
+>   `docs/interrupt_control_design.md`.
+>
+> Header cost is 16 bytes per allocation; the smallest block is 24.
 
 ## Overview
 

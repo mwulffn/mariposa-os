@@ -188,7 +188,11 @@ void kernel_main(struct bootinfo *bi)
     pr_info("Memory system initialized\n");
     pr_info("Fast RAM free: %lu bytes\n", mem_avail_fast());
     pr_info("Slow RAM free: %lu bytes\n", mem_avail_slow());
-    pr_info("Chip RAM free: %lu bytes\n", mem_avail_chip());
+    pr_info("Chip RAM free: %lu bytes, largest block %lu\n",
+            mem_avail_chip(), chip_largest_free());
+    if (mem_check() != MEMCHK_OK)
+        pr_info("  WARNING: heap check failed (%lu) straight after init\n",
+                mem_check());
 
     /* TODO: set up exception handlers */
     /* TODO: initialize display */

@@ -97,6 +97,7 @@ src/shared/                   - Compiled into BOTH the ROM and the kernel
   fat16.{c,h}                 - Read-only FAT16; returns structs, prints nothing
   blkdev.h                    - Block device handle; seed of a device model
   memmap.{c,h}                - The map the ROM builds and the kernel reads
+  bootinfo.h                  - The handoff struct: A0 at kernel entry, versioned
 src/kernel/
   crt0.s                      - Startup stub, receives control from the ROM
   cpu.{s,h}                   - SR primitives, CRITICAL_ENTER/EXIT, cpu_idle
@@ -105,7 +106,7 @@ src/kernel/
   irq.{c,h}                   - Vector install and INTENA setup
   libsup.s                    - 32-bit divide/modulo helpers vbcc calls
   kernel.c                    - Kernel entry point
-  mem.c                       - Bump allocator
+  mem.c                       - Free-list allocator: chip best-fit, fast/slow first-fit
   serial.c                    - Ring buffer + TBE interrupt; polled until irq_init
   kprintf.c                   - Kernel printf
   kernel.ld                   - Linker script, links at $200000
@@ -122,6 +123,8 @@ tests/                        - Headless 68000 test harness (see docs/testing.md
   test_irq.c                  - Paula interrupt registers, autovector dispatch
   test_cpu.c                  - src/kernel/cpu.s and isr.s, loaded as modules
   test_kserial.c              - src/kernel/serial.c, run out of the real SYSTEM.BIN
+  test_boot.c                 - bootinfo layout, and entering the real kernel with it
+  test_kmem.c                 - src/kernel/mem.c against hand-built memory maps
   test_disk.c                 - ata.c/ide.c, rdb.c, fat16.c, disk.c
   mksym.py                    - vasm listing -> flat symbol table
   mkdisk.py                   - Generates the RDB + FAT16 test disk images
@@ -135,7 +138,7 @@ test_*.py                     - FS-UAE integration scripts
 ## Testing
 
 ```bash
-make test                      # headless, 194 tests, ~0.3s, no emulator needed
+make test                      # headless, 216 tests, ~0.3s, no emulator needed
 make test FILTER=rom.panic     # narrow to one group while iterating
 ```
 
@@ -152,6 +155,8 @@ code is the verdict: 0 pass, 1 test failed, 2 harness error.
 | `zorro.*` | `autoconfig.c` against a modelled Zorro II card |
 | `irq.*` | INTENA/INTREQ, interrupt levels, autovector dispatch, UART TBE |
 | `cpu.*` | `src/kernel/cpu.s` SR primitives, `cpu_idle`, and `isr.s` vertical-blank handler |
+| `boot.*` | `bootinfo.h` layout as an ABI; the real kernel entered with good, bad and short handoffs |
+| `kmem.*` | `src/kernel/mem.c`: fit policy, coalescing, bad frees, ownership, `mem_check`, random churn |
 | `kser.*` | `src/kernel/serial.c` + `vectors.s`: ring buffer, TBE ISR, full ring, crash flush |
 | `disk.*` | `ata.c`, `ide.c`, `rdb.c`, `fat16.c` against a generated RDB + FAT16 image |
 
@@ -247,9 +252,19 @@ instead, and `mem.stack_*` pins it.
   after the first burst. `make test` now builds the kernel too, because
   `kser.*` runs the driver out of the real `SYSTEM.BIN` (symbols under a
   `kernel:` prefix). A crash flushes the ring before the ROM's panic dump.
+- The handoff is `struct bootinfo` (`src/shared/bootinfo.h`) in A0: versioned
+  and sized so fields can be appended, carrying the memory map, the boot
+  partition's LBA and length, kernel base/size and the stack top. `boot.*`
+  enters the real kernel with good, bad and truncated structs.
+- The allocator is a free list with coalescing per `docs/mem_design.md`,
+  whose status block lists where the code deliberately differs.
+- **Build gotcha:** macOS ships make 3.81, which compares timestamps to the
+  second. Two builds inside one second leave a stale object in the link -
+  it bit a scripted edit-build-test loop here, not normal use. When
+  scripting rebuilds, `make -C src/kernel clean` first. C objects do depend
+  on every header now (vbcc has no -MD), so a changed struct in
+  `src/shared` rebuilds both the ROM and the kernel.
 - Keyboard input (CIA-A), level 2 PORTS interrupt. Needs the handshake pulse.
-- Real memory allocator: free list with coalescing, per `docs/mem_design.md`.
-  `mem.c` is a bump allocator with no free.
 - Serial receive: an RBF-driven ring at level 5, once something wants input.
 - Block I/O and FAT16 in the kernel. The ROM's copies are boot-time only, so
   once the kernel is running it cannot read a disk at all.
@@ -275,9 +290,6 @@ autovector constant, so zeroing the table fails `rom.iack_table` plus nine
 
 **Known issues**
 
-- The ROM does not tell the kernel where it booted from. The handoff passes
-  only A0 (memory map) and A1 (panic vector); the partition LBA and size are
-  computed and then dropped.
 - `load_partition` reads the partition block from a hardcoded LBA 1 and
   ignores `RDB_PARTLIST`. `PART_NEXT` is printed but never followed, so only
   the first partition is reachable. Carried over unchanged from the assembly
