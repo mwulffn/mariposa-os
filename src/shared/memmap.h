@@ -12,8 +12,22 @@
 #define MEM_TYPE_END       0
 #define MEM_TYPE_CHIP      1
 #define MEM_TYPE_FAST      2
+#define MEM_TYPE_SLOW      3
 #define MEM_TYPE_ROM       5
 #define MEM_TYPE_RESERVED  6
+
+/*
+ * MEM_TYPE_SLOW is the $C00000 trapdoor expansion - "slow", "ranger" or
+ * "bogo" RAM, the A501 and its clones. It is its own type rather than more
+ * MEM_TYPE_FAST because it is neither fast nor chip:
+ *
+ *   - It sits on the chip bus, so the CPU contends with the chipset for it
+ *     and it runs at roughly chip RAM speed, not Zorro II speed.
+ *   - Agnus cannot address it for DMA, so it is not MEMF_DMA either.
+ *
+ * An allocator that saw it as MEM_TYPE_FAST would hand it out ahead of real
+ * fast RAM half the time. Callers should prefer fast, then slow, then chip.
+ */
 
 /*
  * Flags. Bit 0 is what the ROM writes and what print_memory_map has always

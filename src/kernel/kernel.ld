@@ -1,6 +1,7 @@
 SECTIONS
 {
     . = 0x200000;
+    __text_start = .;
 
     .text : {
         *(.text)

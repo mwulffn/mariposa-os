@@ -9,17 +9,24 @@
 
         xdef    _start
         xdef    _rom_panic
+        xdef    _stack_top
 
         xref    _kernel_main
         xref    __bss_start
         xref    __bss_end
 
 _start:
-        ; stash ROM parameters before we clobber registers. Both go on the
-        ; stack, not into .bss - _rom_panic lives in .bss and the clear
-        ; below would zero it straight back out again.
+        ; A7 on entry is the top of the stack the ROM picked for us, and it
+        ; is the only record of it: nothing else in the kernel can work out
+        ; where the stack ends. Grab it before the first push moves it.
+        move.l  sp,d0
+
+        ; stash ROM parameters before we clobber registers. All three go on
+        ; the stack, not into .bss - _rom_panic and _stack_top live in .bss
+        ; and the clear below would zero them straight back out again.
         move.l  a0,-(sp)                ; save memmap pointer
         move.l  a1,-(sp)                ; save panic function
+        move.l  d0,-(sp)                ; save entry stack pointer
 
         ; clear .bss
         lea     __bss_start,a2
@@ -31,7 +38,9 @@ _start:
         bra.s   .clrbss
 .bss_done:
 
-        ; .bss is zeroed, so the panic vector can be published now
+        ; .bss is zeroed, so the saved values can be published now
+        move.l  (sp)+,d0                ; restore entry stack pointer
+        move.l  d0,_stack_top
         move.l  (sp)+,a1                ; restore panic function
         move.l  a1,_rom_panic
 
@@ -50,4 +59,9 @@ _start:
         section .bss
 
 _rom_panic:
+        ds.l    1
+
+; Top of the kernel stack, as handed over in A7. Reported at boot so that a
+; stack landing somewhere it should not is visible rather than silent.
+_stack_top:
         ds.l    1

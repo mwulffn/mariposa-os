@@ -12,6 +12,14 @@ static uint8_t *g_chip;
 static uint8_t *g_fast;
 static uint8_t *g_rom;
 
+/* Trapdoor RAM at $C00000. Absent unless a test attaches it, so every
+ * existing test sees the map it always saw. g_slow_decode is what the board
+ * answers to: equal to g_slow_size for a fully decoded board, larger when
+ * it mirrors itself up the region. */
+static uint8_t *g_slow;
+static uint32_t g_slow_size;
+static uint32_t g_slow_decode;
+
 /* ------------------------------------------------------------------ faults */
 
 static int  g_fault_count;
@@ -120,6 +128,13 @@ static uint8_t *raw_ptr(uint32_t addr, int *writable)
         if (writable) *writable = 0;
         return g_rom + (addr - H_ROM_BASE);
     }
+    if (g_slow_size != 0 &&
+        addr >= H_SLOW_BASE && addr < H_SLOW_BASE + g_slow_decode) {
+        if (writable) *writable = 1;
+        /* Partial decoding: a board that only decodes g_slow_size bytes
+         * answers to every multiple of it up to g_slow_decode. */
+        return g_slow + ((addr - H_SLOW_BASE) % g_slow_size);
+    }
     return NULL;
 }
 
@@ -160,6 +175,14 @@ static void raw_write(uint8_t *p, int size, uint32_t v)
 static int floating_bus(uint32_t addr)
 {
     if (addr >= H_FAST_BASE + H_FAST_SIZE && addr < H_ZORRO_END)
+        return 1;
+
+    /* The trapdoor region, wherever the board does not answer. On hardware
+     * this floats to whatever the chipset last drove onto the chip bus - a
+     * value that changes between reads - rather than floating high like the
+     * Zorro bus. detect_slow_ram writes before it reads for exactly that
+     * reason, so a constant here does not flatter it. */
+    if (addr >= H_SLOW_BASE + g_slow_decode && addr < H_SLOW_LIMIT)
         return 1;
 
     /* Expansion space above the one autoconfig slot at $E80000. Zorro II
@@ -262,6 +285,36 @@ void h_attach_zorro(uint8_t er_type, uint8_t er_flags)
 }
 
 void     h_detach_zorro(void)   { g_zorro_present = 0; }
+
+/* --- trapdoor / slow RAM ------------------------------------------------ */
+
+void h_attach_slow_ram(uint32_t size)
+{
+    h_attach_slow_ram_mirrored(size, size);
+}
+
+void h_attach_slow_ram_mirrored(uint32_t size, uint32_t decode)
+{
+    if (size == 0) {
+        h_detach_slow_ram();
+        return;
+    }
+    if (decode < size)
+        decode = size;
+    if (H_SLOW_BASE + decode > H_SLOW_LIMIT)
+        decode = H_SLOW_LIMIT - H_SLOW_BASE;
+
+    if (g_slow == NULL)
+        g_slow = calloc(1, H_SLOW_LIMIT - H_SLOW_BASE);
+    memset(g_slow, 0, size);
+    g_slow_size   = size;
+    g_slow_decode = decode;
+}
+
+void h_detach_slow_ram(void)
+{
+    g_slow_size = g_slow_decode = 0;
+}
 uint32_t h_zorro_base(void)     { return g_zorro_base_written; }
 int      h_zorro_configured(void) { return g_zorro_done && !g_zorro_shutup; }
 int      h_zorro_shut_up(void)  { return g_zorro_shutup; }
@@ -1004,6 +1057,7 @@ void h_reset(void)
     g_intena = g_intreq = 0;
     g_irq_forced = -1;
     g_zorro_present = 0;
+    h_detach_slow_ram();
     g_zorro_done = g_zorro_shutup = 0;
     g_zorro_base_written = 0;
     g_cycles = 0;

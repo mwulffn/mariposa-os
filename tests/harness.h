@@ -27,6 +27,12 @@
 #define H_ROM_BASE    0xFC0000u
 #define H_ROM_SIZE    0x040000u          /* 256KB */
 
+/* Trapdoor RAM at $C00000 ("slow", "ranger", "bogo"). Absent by default.
+ * H_SLOW_LIMIT is where Gary stops decoding it and Gayle, the battery clock
+ * and the custom chips begin - detect_slow_ram must never probe that far. */
+#define H_SLOW_BASE   0x00C00000u
+#define H_SLOW_LIMIT  0x00D80000u
+
 /* Scratch for test data (strings, buffers), bump-allocated, reset per test. */
 #define H_SCRATCH_BASE 0x280000u
 #define H_SCRATCH_SIZE 0x010000u
@@ -262,6 +268,20 @@ uint16_t h_get_sr(void);
  */
 void     h_attach_zorro(uint8_t er_type, uint8_t er_flags);
 void     h_detach_zorro(void);
+
+/* --- trapdoor / slow RAM -------------------------------------------------
+ *
+ * Nothing is fitted unless a test asks for it, so the memory map every other
+ * test checks is the one it always was. Unfitted address ranges inside the
+ * region float rather than faulting, which is what detect_slow_ram relies on.
+ *
+ * The mirrored form models a board that decodes fewer address lines than it
+ * answers to: `size` bytes of real memory appearing over and over across
+ * `decode` bytes of address space. Sizing that only wrote and read back
+ * would measure `decode` and be wrong by up to 1MB. */
+void     h_attach_slow_ram(uint32_t size);
+void     h_attach_slow_ram_mirrored(uint32_t size, uint32_t decode);
+void     h_detach_slow_ram(void);
 
 /* The address the card was told to move to, or 0 if it never was. */
 uint32_t h_zorro_base(void);

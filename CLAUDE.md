@@ -215,7 +215,15 @@ Testing like this is only possible if kernel has crashed to debugger, or debugge
 ## Next Steps
 
 Done since this list was written: FAT16 read-only, and loading SYSTEM.BIN
-from disk. Both are covered by the `disk.*` tests.
+from disk. Both are covered by the `disk.*` tests. The memory map's flags
+are also settled: the kernel includes `src/shared/memmap.h` instead of
+restating the struct and the flag bits, and `mem.*` pins what the ROM
+writes. Fixing those turned up a live stack bug: `bootstrap.s` picked the
+first RESERVED entry at or above $200000 as the kernel stack, which became
+the loaded kernel image itself once `reserve_kernel_image` started carving
+it out, so the kernel ran with ~500 bytes of stack on top of its own code.
+`rom_kernel_stack_top` takes the highest reserved region in fast RAM
+instead, and `mem.stack_*` pins it.
 
 **Next up**
 
@@ -255,9 +263,3 @@ from disk. Both are covered by the `disk.*` tests.
   for in the wrong place and never found. Harmless today because the space
   above the slot floats and the scan just ends, and because one card is all
   anything here has.
-- The memory map's flags are muddled. The ROM writes bit 0 and
-  `print_memory_map` prints it as `[DMA]`, but the kernel's `mem.h` called
-  bit 0 `MEMF_TESTED`. `src/shared/memmap.h` now records the ROM's actual
-  behaviour. Separately, fast RAM is marked DMA-capable, which is wrong -
-  Zorro II RAM is not reachable by the chipset's DMA. Nothing reads the
-  flags yet, so neither has bitten.

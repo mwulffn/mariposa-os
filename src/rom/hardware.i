@@ -187,6 +187,7 @@ ROM_FLAGS       equ $0000           ; No flags
 MEM_TYPE_END      equ 0             ; Table terminator
 MEM_TYPE_CHIP     equ 1             ; Chip RAM (DMA capable)
 MEM_TYPE_FAST     equ 2             ; Fast RAM (CPU only)
+MEM_TYPE_SLOW     equ 3             ; Slow/trapdoor RAM at $C00000, no DMA
 MEM_TYPE_ROM      equ 5             ; Read-only memory
 MEM_TYPE_RESERVED equ 6             ; Reserved (vectors, ROM data)
 

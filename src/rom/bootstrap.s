@@ -125,29 +125,14 @@ start:
     bsr     SerialPrintf
     addq.l  #4,sp
 
-    ; Find kernel stack (RESERVED entry) in memory table
-    lea     MEMMAP_TABLE,a2
-.find_stack:
-    move.l  (a2)+,d2            ; base
-    move.l  (a2)+,d3            ; size
-    move.w  (a2)+,d4            ; type
-    addq.l  #2,a2               ; skip flags
-
-    ; Check for end of table (both base AND size are 0)
-    move.l  d2,d0
-    or.l    d3,d0
+    ; Find the top of the kernel stack. This used to be a walk of the table
+    ; here, taking the first RESERVED entry at or above $200000 - which
+    ; stopped being the stack the moment reserve_kernel_image began marking
+    ; the loaded image RESERVED at $200000. memory.c takes the highest one
+    ; instead; see rom_kernel_stack_top.
+    bsr     kernel_stack_top
+    move.l  d0,d3
     beq.s   .no_stack_found
-
-    ; Look for RESERVED type
-    cmp.w   #MEM_TYPE_RESERVED,d4
-    bne.s   .find_stack
-
-    ; Check if this is in fast RAM range ($200000+)
-    cmp.l   #$200000,d2
-    blt.s   .find_stack         ; Skip low reserved areas
-
-    ; Kernel stack found: stack = base + size (top)
-    add.l   d2,d3
 
     ; Set kernel entry parameters:
     ; A0 = memory map pointer
