@@ -6,6 +6,7 @@
  * shared is the table's shape, in src/shared/memmap.h.
  */
 #include "memmap.h"
+#include "bootinfo.h"
 #include "rom.h"
 
 #define CHIP_BASE       0x000000UL
@@ -284,6 +285,42 @@ unsigned long rom_kernel_stack_top(void)
         }
     }
     return top;
+}
+
+/* -------------------------------------------------------------- handoff --- */
+
+/*
+ * Build the struct the kernel is handed in A0. See bootinfo.h for the rules
+ * on growing it.
+ *
+ * Everything the ROM worked out on the way to the kernel goes here, which
+ * is the point: the partition LBA used to be computed by load_partition,
+ * used once to find SYSTEM.BIN, and then lost, leaving a kernel that could
+ * not find the disk it had just been read from.
+ */
+struct bootinfo *rom_build_bootinfo(unsigned long part_lba,
+                                    unsigned long part_blocks,
+                                    unsigned long kernel_size,
+                                    unsigned long stack_top,
+                                    void (*panic)(void))
+{
+    struct bootinfo *bi = (struct bootinfo *)BOOTINFO_ADDR;
+
+    bi->magic            = BOOTINFO_MAGIC;
+    bi->version          = BOOTINFO_VERSION;
+    bi->size             = sizeof *bi;
+    bi->memmap           = MEMMAP_TABLE;
+    bi->rom_panic        = panic;
+    bi->kernel_base      = FAST_BASE;
+    bi->kernel_size      = kernel_size;
+    bi->stack_top        = stack_top;
+    bi->boot_dev_type    = BOOTDEV_IDE;     /* the only device blkdev_boot has */
+    bi->boot_dev_unit    = 0;
+    bi->boot_part_lba    = part_lba;
+    bi->boot_part_blocks = part_blocks;
+    bi->rom_version      = *(const unsigned short *)0xFC000CUL;
+    bi->reserved0        = 0;
+    return bi;
 }
 
 /* ------------------------------------------------------------- printing --- */

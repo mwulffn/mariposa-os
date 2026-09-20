@@ -101,6 +101,10 @@ start:
     tst.l   d0
     bne     .enter_debugger         ; Go to debugger if error
     ; On success: D1 = partition start LBA, D2 = partition size in blocks
+    ; Keep both for the handoff. D1 is about to be reused for the file size;
+    ; every glue routine from here on preserves D4-D7.
+    move.l  d1,d4
+    move.l  d2,d5
 
     ; ============================================================
     ; 8. LOAD SYSTEM.BIN FROM PARTITION
@@ -115,6 +119,7 @@ start:
     ; entry starts at $200000 and covers the image we just loaded there.
     ; Carve the image out now that the size is known, or the kernel is handed
     ; its own code as free memory.
+    move.l  d1,d6                   ; file size, for the handoff
     move.l  d1,d0
     bsr     reserve_kernel_image
 
@@ -134,17 +139,26 @@ start:
     move.l  d0,d3
     beq.s   .no_stack_found
 
-    ; Set kernel entry parameters:
-    ; A0 = memory map pointer
-    lea     MEMMAP_TABLE,a0
-    ; A1 = ROM panic handler
+    ; Build the handoff struct - see src/shared/bootinfo.h. vbcc ABI:
+    ; arguments pushed right to left, result in D0.
+    pea     debugger_entry(pc)      ; panic entry
+    move.l  d3,-(sp)                ; stack top
+    move.l  d6,-(sp)                ; kernel size
+    move.l  d5,-(sp)                ; partition blocks
+    move.l  d4,-(sp)                ; partition LBA
+    jsr     _rom_build_bootinfo
+    lea     20(sp),sp
+
+    ; Kernel entry:
+    ;   A0 = struct bootinfo *
+    ;   A1 = ROM panic entry. Also in the struct; passed bare as well so the
+    ;        kernel can still complain if the struct is unreadable.
+    move.l  d0,a0
     lea     debugger_entry(pc),a1
     ; SR = supervisor, interrupts disabled
     move.w  #$2700,sr
     ; SP = top of kernel stack
     move.l  d3,sp
-
-
 
     ; Jump to kernel
     jmp     KERNEL_LOAD_ADDR

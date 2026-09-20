@@ -53,6 +53,11 @@ $(BUILD)/bootstrap.o: $(ASM_MAIN) $(ASM_INC) $(INCS) | $(BUILD)
 $(BUILD)/libsup.o: $(LIBSUP_SRC) | $(BUILD)
 	$(ASM) $(AFLAGS) -o $@ $<
 
+# No per-file dependency tracking: vbcc has no -MD. Every C object depends
+# on every header instead - see the same rule in ../kernel/Makefile.
+HEADERS = $(wildcard *.h ../shared/*.h)
+$(CSRC:%.c=$(BUILD)/%.asm) $(SOBJ:.o=.asm): $(HEADERS)
+
 $(BUILD)/%.asm: %.c | $(BUILD)
 	$(CC68) $(CFLAGS) -o=$@ $<
 

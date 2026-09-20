@@ -9,6 +9,7 @@
     xref    _rom_print_memory_map
     xref    _rom_reserve_kernel_image
     xref    _rom_kernel_stack_top
+    xref    _rom_build_bootinfo     ; called straight from bootstrap.s
 
 ; detect_chip_ram - D0.l = chip RAM size in bytes
 detect_chip_ram:

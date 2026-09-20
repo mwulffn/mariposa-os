@@ -3,6 +3,7 @@
  */
 
 #include "amiga_hw.h"
+#include "bootinfo.h"
 #include "mem.h"
 #include "serial.h"
 #include "kprintf.h"
@@ -125,13 +126,56 @@ static void print_memory_map(struct mem_entry *map)
     pr_info("==================\n\n");
 }
 
-void kernel_main(struct mem_entry *memmap)
+static void print_boot_device(const struct bootinfo *bi)
 {
+    /* Absent is not the same as none: a ROM older than the field cannot
+     * say, a ROM that found no disk says BOOTDEV_NONE. */
+    if (!BOOTINFO_HAS(bi, boot_part_blocks)) {
+        pr_info("Boot device: not reported by this ROM\n");
+        return;
+    }
+    if (bi->boot_dev_type == BOOTDEV_IDE)
+        pr_info("Boot device: IDE unit %u, partition at block %lu, "
+                "%lu blocks\n", (unsigned)bi->boot_dev_unit,
+                bi->boot_part_lba, bi->boot_part_blocks);
+    else
+        pr_info("Boot device: none\n");
+}
+
+/* The handoff, kept for whoever needs it later - the block layer will want
+ * the boot partition. Valid once kernel_main has checked it. */
+const struct bootinfo *bootinfo;
+
+void kernel_main(struct bootinfo *bi)
+{
+    struct mem_entry *memmap;
+
     /* Initialize serial */
     ser_init();
 
+    /*
+     * Check the handoff before believing any of it. The likely way to get
+     * here with a bad one is a ROM from before the struct existed, which
+     * passes the memory map in A0 - and a memory map walked as a bootinfo
+     * yields plausible-looking pointers. rom_panic came in A1 as well as in
+     * the struct precisely so that this can still be reported.
+     */
+    if (bi->magic != BOOTINFO_MAGIC || bi->version < 1 ||
+        !BOOTINFO_HAS(bi, stack_top)) {
+        pr_info("\nKERNEL: bad boot info at $%08lx (magic $%08lx) - "
+                "ROM and kernel out of step?\n",
+                (unsigned long)bi, bi->magic);
+        rom_panic();
+    }
+    bootinfo = bi;
+    memmap = bi->memmap;
+
     pr_info("\n");
     pr_info("Kernel starting successfully!\n");
+    pr_info("Boot info v%u, %u bytes, from ROM v%u\n", (unsigned)bi->version,
+            (unsigned)bi->size,
+            BOOTINFO_HAS(bi, rom_version) ? (unsigned)bi->rom_version : 0u);
+    print_boot_device(bi);
 
     print_image_and_stack(memmap);
 

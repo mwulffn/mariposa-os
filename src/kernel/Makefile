@@ -50,6 +50,12 @@ $(SYM): $(TARGET)
 $(BUILD)/%.o: %.s | $(BUILD)
 	$(VASM) $(VASMFLAGS) -o $@ $<
 
+# No per-file dependency tracking: vbcc has no -MD. Every C object depends
+# on every header instead, which is cheap at this size and cannot go stale -
+# a changed struct in ../shared must never leave an old object in the link.
+HEADERS = $(wildcard *.h ../shared/*.h)
+$(CASM) $(SOBJ:.o=.asm): $(HEADERS)
+
 $(BUILD)/%.asm: %.c | $(BUILD)
 	$(VBCC) $(VBCCFLAGS) -o=$@ $<
 

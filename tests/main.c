@@ -21,6 +21,7 @@ extern const test_suite disk_suite;
 extern const test_suite libsup_suite;
 extern const test_suite cpu_suite;
 extern const test_suite kserial_suite;
+extern const test_suite boot_suite;
 
 /*
  * Position-independent kernel assembly, assembled to origin zero and loaded
@@ -95,7 +96,8 @@ int main(int argc, char **argv)
         const test_suite suites[] = { libsup_suite, format_suite,
                                       vector_suite, irq_suite, cpu_suite,
                                       memory_suite, zorro_suite,
-                                      disk_suite, kserial_suite };
+                                      disk_suite, kserial_suite,
+                                      boot_suite };
         rc = run_suites(suites, sizeof suites / sizeof suites[0], filter);
     }
 

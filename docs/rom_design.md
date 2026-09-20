@@ -99,7 +99,8 @@ $00950 - $00A4F   Copper list for debugger (256 bytes)
 $00A50 - $0324F   Debug display bitplane (10KB, 320x256x1)
 $03250 - $033FF   Memory map table (432 bytes, up to 36 entries)
 $03400 - $034FF   Sprintf output buffer (256 bytes)
-$03500 - $03FFF   Reserved for expansion (~2.75KB)
+$03500 - $0357F   Boot info handed to the kernel (struct bootinfo, 44 bytes used)
+$03580 - $03FFF   Reserved for expansion (~2.6KB)
 $04000 - $FFFFF   Kernel-managed chip RAM (~1008KB)
 ```
 
@@ -150,13 +151,16 @@ On any exception:
    - Load to $200000 (fast RAM)
    
 6. Transfer to kernel
-   - A0 = pointer to memory map ($3250)
-   - A1 = ROM debugger entry point
-   - SSP = top of the reserved kernel stack, found by scanning the memory
-     map for the RESERVED entry above $200000
+   - Build `struct bootinfo` at $3500 (see `src/shared/bootinfo.h`): memory
+     map pointer, panic entry, kernel base/size, stack top, boot device and
+     the boot partition's LBA and length. Versioned and sized, so fields can
+     be appended without breaking an older kernel or ROM.
+   - A0 = pointer to the boot info
+   - A1 = ROM debugger entry point (also in the struct; passed bare so the
+     kernel can still report an unreadable struct)
+   - SSP = top of the reserved kernel stack: the highest RESERVED entry in
+     fast RAM
    - Jump to $200000
-   - Note: the partition LBA and size are computed during load and then
-     dropped. The kernel is not told where it booted from.
    
 On failure at any step â†’ enter debugger with error message
 ```

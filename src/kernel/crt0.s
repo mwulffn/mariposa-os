@@ -1,7 +1,8 @@
 ; crt0.s - Kernel startup stub
 ; Receives control from ROM with:
-;   A0 = memory map pointer
-;   A1 = ROM panic entry point
+;   A0 = struct bootinfo * (src/shared/bootinfo.h)
+;   A1 = ROM panic entry point - also in the struct, but passed bare so
+;        there is a way to complain when the struct is unreadable
 ;   A7 = top of fast RAM (stack)
 ;   SR = $2700 (supervisor, interrupts disabled)
 
@@ -25,7 +26,7 @@ _start:
         ; stash ROM parameters before we clobber registers. All three go on
         ; the stack, not into .bss - _rom_panic and _stack_top live in .bss
         ; and the clear below would zero them straight back out again.
-        move.l  a0,-(sp)                ; save memmap pointer
+        move.l  a0,-(sp)                ; save bootinfo pointer
         move.l  a1,-(sp)                ; save panic function
         move.l  d0,-(sp)                ; save entry stack pointer
 
@@ -45,8 +46,8 @@ _start:
         move.l  (sp)+,a1                ; restore panic function
         move.l  a1,_rom_panic
 
-        ; call kernel_main(memmap)
-        move.l  (sp)+,a0                ; restore memmap pointer
+        ; call kernel_main(bootinfo)
+        move.l  (sp)+,a0                ; restore bootinfo pointer
         move.l  a0,-(sp)                ; push as C argument
         jsr     _kernel_main
         addq.l  #4,sp                   ; clean up argument

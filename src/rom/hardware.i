@@ -165,6 +165,7 @@ COPPERLIST      equ $000950         ; Copper list (256 bytes)
 SCREEN          equ $000A50         ; Display bitplane (10KB)
 MEMMAP_TABLE    equ $003250         ; Memory map (432 bytes)
 SPRINTF_BUFFER  equ $003400         ; Sprintf output buffer (256 bytes)
+BOOTINFO        equ $003500         ; struct bootinfo, see src/shared/bootinfo.h
 KERNEL_CHIP     equ $004000         ; Kernel-managed chip RAM start
 KERNEL_LOAD_ADDR equ $200000        ; Where SYSTEM.BIN is loaded
 
