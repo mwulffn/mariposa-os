@@ -1,25 +1,23 @@
 # Interrupt Control Design
 
-> **Status.** Not implemented. `cpu.s` does not exist, and none of the four
-> functions or the two macros below have been written.
+> **Status.** Implemented: `src/kernel/cpu.s` and `cpu.h`, tested by
+> `cpu.*`. Interrupts are enabled - `kernel_main` calls `irq_init()` and
+> `cpu_int_enable()` - and the first real user of the critical-section macros
+> is the serial ring buffer (`docs/serial_design.md`).
 >
-> More importantly, **nothing in the system enables interrupts at all**, so
-> there is currently nothing for these to control. They are gated twice and
-> both gates are shut:
+> Differences from the text below, all deliberate: the C prototypes use
+> `unsigned long`; `cpu_int_disable()` returns the previous SR, which is what
+> rule 1 needs; the macros take no argument
+> (`CRITICAL_ENTER(); ... CRITICAL_EXIT();`); and there is a fifth function,
+> `cpu_idle()`, which is `STOP #$2000` - unmask and halt in one instruction,
+> so an interrupt cannot slip in between the two and be slept through.
 >
-> - `bootstrap.s` writes `$7FFF` to INTENA at reset, clearing every enable
->   including the master INTEN bit, and never writes INTENA again.
-> - `bootstrap.s` sets SR to `$2700` immediately before jumping to the
->   kernel, masking CPU levels 1-7, and the kernel never lowers it.
+> Rule 3 needs a caveat: the 68000 masks only the ISR's own level and below.
+> An ISR sharing state with code that a *higher* level ISR may call has to
+> raise the mask itself, as `ser_tbe_handler` does.
 >
-> Note that INTREQ bits are set by the hardware regardless of INTENA, so
-> polled waits such as the `WaitVBL()` macro in `amiga_hw.h` work fine with
-> interrupts fully disabled. That can make it look as though interrupts are
-> partly working when none has ever fired.
->
-> First thing to build once they are enabled: an ISR that increments a
-> counter, so "did it fire, and how often" has an unambiguous answer. On PAL
-> the vertical blank should give 50 per second.
+> INTREQ bits are set by the hardware regardless of INTENA, so polled waits
+> such as the `WaitVBL()` macro in `amiga_hw.h` work with interrupts disabled.
 
 ## Overview
 

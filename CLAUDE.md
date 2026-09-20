@@ -99,15 +99,18 @@ src/shared/                   - Compiled into BOTH the ROM and the kernel
   memmap.{c,h}                - The map the ROM builds and the kernel reads
 src/kernel/
   crt0.s                      - Startup stub, receives control from the ROM
-  cpu.{s,h}                   - SR primitives and CRITICAL_ENTER/EXIT
+  cpu.{s,h}                   - SR primitives, CRITICAL_ENTER/EXIT, cpu_idle
   isr.s                       - Interrupt service routines (vertical blank)
-  irq.{c,h}                   - Vector install and INTENA setup; not called yet
+  vectors.s                   - Stubs that call C: serial TBE ISR, crash flush
+  irq.{c,h}                   - Vector install and INTENA setup
   libsup.s                    - 32-bit divide/modulo helpers vbcc calls
   kernel.c                    - Kernel entry point
   mem.c                       - Bump allocator
-  serial.c / kprintf.c        - Polled serial and kernel printf
+  serial.c                    - Ring buffer + TBE interrupt; polled until irq_init
+  kprintf.c                   - Kernel printf
   kernel.ld                   - Linker script, links at $200000
   build/SYSTEM.BIN            - Compiled kernel binary
+  build/kernel.sym            - Symbol table for the tests, from the vlink map
 tests/                        - Headless 68000 test harness (see docs/testing.md)
   harness.{c,h}               - Machine model, symbol lookup, call/run, disk model
   protocol.{c,h}              - The ### result protocol and exit codes
@@ -118,6 +121,7 @@ tests/                        - Headless 68000 test harness (see docs/testing.md
   test_zorro.c                - autoconfig.c against a modelled Zorro II card
   test_irq.c                  - Paula interrupt registers, autovector dispatch
   test_cpu.c                  - src/kernel/cpu.s and isr.s, loaded as modules
+  test_kserial.c              - src/kernel/serial.c, run out of the real SYSTEM.BIN
   test_disk.c                 - ata.c/ide.c, rdb.c, fat16.c, disk.c
   mksym.py                    - vasm listing -> flat symbol table
   mkdisk.py                   - Generates the RDB + FAT16 test disk images
@@ -131,7 +135,7 @@ test_*.py                     - FS-UAE integration scripts
 ## Testing
 
 ```bash
-make test                      # headless, 181 tests, ~0.3s, no emulator needed
+make test                      # headless, 194 tests, ~0.3s, no emulator needed
 make test FILTER=rom.panic     # narrow to one group while iterating
 ```
 
@@ -147,7 +151,8 @@ code is the verdict: 0 pass, 1 test failed, 2 harness error.
 | `mem.*` | `memory.c`, `memmap.c`: detection, the map, the kernel reservation |
 | `zorro.*` | `autoconfig.c` against a modelled Zorro II card |
 | `irq.*` | INTENA/INTREQ, interrupt levels, autovector dispatch, UART TBE |
-| `cpu.*` | `src/kernel/cpu.s` SR primitives and `isr.s` vertical-blank handler |
+| `cpu.*` | `src/kernel/cpu.s` SR primitives, `cpu_idle`, and `isr.s` vertical-blank handler |
+| `kser.*` | `src/kernel/serial.c` + `vectors.s`: ring buffer, TBE ISR, full ring, crash flush |
 | `disk.*` | `ata.c`, `ide.c`, `rdb.c`, `fat16.c` against a generated RDB + FAT16 image |
 
 Prefer this tier for anything that is pure logic. Use FS-UAE only for
@@ -236,12 +241,16 @@ instead, and `mem.stack_*` pins it.
   `cpu_int_enable`, and waits for 50 vertical blanks before reporting, so a
   dead interrupt path hangs visibly at boot. `src/kernel/cpu.s` has the four
   SR wrappers and `cpu.h` the critical-section macros; `src/kernel/isr.s`
-  has the vertical-blank handler. Next is a real consumer - see below.
+  has the vertical-blank handler. The idle loop is `cpu_idle()` (STOP).
+- Serial transmit is interrupt-driven per `docs/serial_design.md`, which was
+  rewritten to match: the first draft's enable-TBE-on-putc scheme deadlocks
+  after the first burst. `make test` now builds the kernel too, because
+  `kser.*` runs the driver out of the real `SYSTEM.BIN` (symbols under a
+  `kernel:` prefix). A crash flushes the ring before the ROM's panic dump.
 - Keyboard input (CIA-A), level 2 PORTS interrupt. Needs the handshake pulse.
 - Real memory allocator: free list with coalescing, per `docs/mem_design.md`.
   `mem.c` is a bump allocator with no free.
-- Interrupt-driven serial with a ring buffer, per `docs/serial_design.md`.
-  Both ROM and kernel serial are polled today.
+- Serial receive: an RBF-driven ring at level 5, once something wants input.
 - Block I/O and FAT16 in the kernel. The ROM's copies are boot-time only, so
   once the kernel is running it cannot read a disk at all.
 - Tasks and a scheduler, once interrupts and the allocator are in place.

@@ -20,6 +20,7 @@ extern const test_suite zorro_suite;
 extern const test_suite disk_suite;
 extern const test_suite libsup_suite;
 extern const test_suite cpu_suite;
+extern const test_suite kserial_suite;
 
 /*
  * Position-independent kernel assembly, assembled to origin zero and loaded
@@ -33,6 +34,14 @@ static const struct { const char *name; uint32_t base; } modules[] = {
     { "isr",    0x00120000u },
 };
 
+/*
+ * The real kernel image, linked at $200000, with its symbols under a
+ * "kernel:" prefix. This is how the kernel's C gets tested: not a copy built
+ * for the tests, the SYSTEM.BIN that boots. .bss lies past the end of the
+ * file and is simply RAM, which h_reset zeroes - the job crt0 does.
+ */
+#define KERNEL_BASE 0x00200000u
+
 /* Where mkdisk.py put the generated disk images. */
 void t_set_disk_dir(const char *dir);
 
@@ -42,6 +51,8 @@ int main(int argc, char **argv)
     const char *sym    = "../src/rom/build/kick.sym";
     const char *filter = NULL;
     const char *builddir = "build";
+    const char *kernel   = "../src/kernel/build/SYSTEM.BIN";
+    const char *ksym     = "../src/kernel/build/kernel.sym";
     int i, rc;
 
     for (i = 1; i < argc; i++) {
@@ -49,10 +60,12 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--sym") == 0 && i + 1 < argc)    sym = argv[++i];
         else if (strcmp(argv[i], "--filter") == 0 && i + 1 < argc) filter = argv[++i];
         else if (strcmp(argv[i], "--builddir") == 0 && i + 1 < argc) builddir = argv[++i];
+        else if (strcmp(argv[i], "--kernel") == 0 && i + 1 < argc) kernel = argv[++i];
+        else if (strcmp(argv[i], "--ksym") == 0 && i + 1 < argc) ksym = argv[++i];
         else {
             fprintf(stderr,
                 "usage: %s [--rom PATH] [--sym PATH] [--filter SUBSTRING]"
-                " [--builddir DIR]\n",
+                " [--builddir DIR] [--kernel PATH] [--ksym PATH]\n",
                 argv[0]);
             return 2;
         }
@@ -73,11 +86,16 @@ int main(int argc, char **argv)
             return 2;
     }
 
+    if (h_load_module(kernel, KERNEL_BASE) != 0)
+        return 2;
+    if (h_add_symbols_prefixed(ksym, 0, "kernel:") != 0)
+        return 2;
+
     {
         const test_suite suites[] = { libsup_suite, format_suite,
                                       vector_suite, irq_suite, cpu_suite,
                                       memory_suite, zorro_suite,
-                                      disk_suite };
+                                      disk_suite, kserial_suite };
         rc = run_suites(suites, sizeof suites / sizeof suites[0], filter);
     }
 

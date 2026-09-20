@@ -74,6 +74,7 @@ static uint64_t g_tsre_at;         /* cycle the shifter empties */
 static uint64_t g_tbe_cycles  = 64;
 static uint64_t g_tsre_cycles = 128;
 static int      g_tbe_signalled;   /* INTREQ TBE already raised for this byte */
+static unsigned g_tx_overruns;     /* SERDAT written while TBE was clear */
 
 static uint16_t serdatr_value(void)
 {
@@ -647,6 +648,11 @@ static void custom_write(uint32_t addr, int size, uint32_t val)
     (void)size;
 
     if (off == REG_SERDAT) {
+        /* Paula has one buffer byte. Writing before TBE destroys the byte
+         * still waiting in it, silently. The capture keeps both so the text
+         * stays readable; the count is what a test asserts on. */
+        if (g_cycles < g_tbe_at)
+            g_tx_overruns++;
         if (g_tx_len + 1 < sizeof g_tx)
             g_tx[g_tx_len++] = (char)(val & 0xFF);
         g_tbe_at  = g_cycles + g_tbe_cycles;
@@ -762,7 +768,7 @@ static size_t  g_nsyms;
 
 static size_t g_symcap;
 
-static int load_symbols(const char *path, uint32_t bias)
+static int load_symbols(const char *path, uint32_t bias, const char *prefix)
 {
     FILE *f = fopen(path, "r");
     char line[256];
@@ -784,7 +790,8 @@ static int load_symbols(const char *path, uint32_t bias)
             g_syms = realloc(g_syms, g_symcap * sizeof *g_syms);
             if (!g_syms) { fprintf(stderr, "harness: out of memory\n"); exit(2); }
         }
-        snprintf(g_syms[g_nsyms].name, sizeof g_syms[g_nsyms].name, "%s", name);
+        snprintf(g_syms[g_nsyms].name, sizeof g_syms[g_nsyms].name, "%s%s",
+                 prefix, name);
         g_syms[g_nsyms].addr = (uint32_t)addr + bias;
         g_nsyms++;
     }
@@ -802,7 +809,12 @@ static int load_symbols(const char *path, uint32_t bias)
 
 int h_add_symbols(const char *path, uint32_t bias)
 {
-    return load_symbols(path, bias);
+    return load_symbols(path, bias, "");
+}
+
+int h_add_symbols_prefixed(const char *path, uint32_t bias, const char *prefix)
+{
+    return load_symbols(path, bias, prefix);
 }
 
 uint32_t h_sym(const char *name)
@@ -1035,6 +1047,13 @@ h_result h_run(uint32_t pc)
 const char *h_serial(void)     { g_tx[g_tx_len] = '\0'; return g_tx; }
 size_t      h_serial_len(void) { return g_tx_len; }
 void        h_serial_clear(void) { g_tx_len = 0; g_tx[0] = '\0'; }
+unsigned    h_serial_overruns(void) { return g_tx_overruns; }
+
+void h_serial_set_timing(uint64_t tbe_cycles, uint64_t tsre_cycles)
+{
+    g_tbe_cycles  = tbe_cycles;
+    g_tsre_cycles = tsre_cycles;
+}
 
 void h_serial_input(const char *s)
 {
@@ -1066,6 +1085,9 @@ void h_reset(void)
     g_zorro_base_written = 0;
     g_cycles = 0;
     g_tbe_at = g_tsre_at = 0;
+    g_tbe_cycles  = 64;
+    g_tsre_cycles = 128;
+    g_tx_overruns = 0;
     g_tbe_signalled = 1;       /* idle transmitter, nothing sent yet */
     g_budget = H_DEFAULT_BUDGET;   /* a test that lowered it must not leak it */
     g_fault_count = 0;
@@ -1126,7 +1148,7 @@ int h_init(const char *rom_path, const char *sym_path)
         return 2;
     }
 
-    load_symbols(sym_path, 0);
+    load_symbols(sym_path, 0, "");
     h_reset();
     return 0;
 }

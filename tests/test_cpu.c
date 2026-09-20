@@ -211,6 +211,43 @@ static void t_vbl_handler_silent_while_sr_masks(void)
     CHECK_U32(H_INTF_VERTB, h_intreq());        /* still pending */
 }
 
+/* --- idle -----------------------------------------------------------------
+ *
+ * cpu_idle is STOP #$2000: it lowers the mask and halts in one instruction,
+ * and comes back after the handler has run.
+ */
+static void t_idle_wakes_on_interrupt(void)
+{
+    h_result r;
+
+    arm_vbl();
+    h_raise(H_INTF_VERTB);
+
+    h_begin_call();
+    h_set_sr(0x2700);                   /* masked: STOP itself must unmask */
+    r = h_call(h_sym("_cpu_idle"));
+
+    CHECK_CALL(r);
+    CHECK_U32(1u, h_peek32(h_sym("_vbl_count")));
+    CHECK_U32(0x2000u, h_get_sr() & 0xFF00u);
+}
+
+/* With nothing to wake it, it must actually stop rather than fall through:
+ * an idle loop built on a cpu_idle that returns at once is a spin loop with
+ * extra steps. */
+static void t_idle_really_stops(void)
+{
+    h_result r;
+
+    h_begin_call();
+    h_set_cycle_budget(100000);
+    r = h_call(h_sym("_cpu_idle"));
+
+    CHECK(r.status == H_TIMEOUT,
+          "cpu_idle returned with no interrupt pending (status %d)",
+          (int)r.status);
+}
+
 /* ------------------------------------------------------------------------ */
 
 static const test_case tests[] = {
@@ -226,6 +263,8 @@ static const test_case tests[] = {
     { "vbl_acks_only_vertb",   t_vbl_handler_leaves_other_sources_pending, NULL },
     { "vbl_preserves_regs",    t_vbl_handler_preserves_registers, NULL },
     { "vbl_masked_by_sr",      t_vbl_handler_silent_while_sr_masks, NULL },
+    { "idle_wakes",            t_idle_wakes_on_interrupt,         NULL },
+    { "idle_really_stops",     t_idle_really_stops,               NULL },
 };
 
 const test_suite cpu_suite = { "cpu", tests, sizeof tests / sizeof tests[0] };

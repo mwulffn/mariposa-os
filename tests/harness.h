@@ -100,6 +100,12 @@ uint32_t h_sym(const char *name);
  * module assembled at origin zero and loaded somewhere else. */
 int h_add_symbols(const char *path, uint32_t bias);
 
+/* The same, with `prefix` glued onto every name. The kernel image shares
+ * source with the ROM (serial_hw.c, for one), so its symbols would collide
+ * with the ROM's and lose: lookup is first match. Loaded as "kernel:", a
+ * test says h_sym("kernel:_ser_puts") and gets the kernel's. */
+int h_add_symbols_prefixed(const char *path, uint32_t bias, const char *prefix);
+
 /* --- guest memory ------------------------------------------------------- */
 
 uint32_t h_alloc(const void *data, size_t len);  /* copy into scratch, return address */
@@ -160,6 +166,19 @@ size_t      h_serial_len(void);
 /* Drop the captured output. A test that calls a printing routine more than
  * once needs this between calls, or it reads back all of them concatenated. */
 void        h_serial_clear(void);
+
+/* How many times SERDAT was written while TBE was clear. On the real chip
+ * each of those destroys the byte still waiting in the buffer, so for any
+ * driver the only acceptable answer is zero. The capture above cannot show
+ * it - it records every write - which is why this is counted separately. */
+unsigned    h_serial_overruns(void);
+
+/* Transmitter speed, in CPU cycles from the SERDAT write: when the buffer
+ * frees (TBE) and when the shifter empties (TSRE). The default 64/128 is far
+ * faster than any real baud rate, so a ring buffer never fills; a test that
+ * wants it to fill slows the UART down. 9600 baud is about 7400 cycles a
+ * character. Restored by h_reset. */
+void        h_serial_set_timing(uint64_t tbe_cycles, uint64_t tsre_cycles);
 
 /* Queue input for serial_get_char / serial_wait_char.
  *

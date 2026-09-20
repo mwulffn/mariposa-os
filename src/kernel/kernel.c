@@ -150,17 +150,18 @@ void kernel_main(struct mem_entry *memmap)
     /* TODO: initialize display */
     /* TODO: everything else */
 
-    /* Arm the vertical blank interrupt, then prove it arrives: a count that
-     * never moves would otherwise look exactly like a healthy idle loop. */
+    /* Arm interrupts. Serial switches from polled to its ring buffer here,
+     * so everything above was on the wire before it returned and everything
+     * below is queued. Then prove interrupts arrive: a count that never
+     * moves would otherwise look exactly like a healthy idle loop. */
     irq_init();
     cpu_int_enable();
     while (vbl_count < 50)
-        ;
+        cpu_idle();
     pr_info("Interrupts running: 50 vertical blanks counted\n");
 
     pr_info("Entering idle loop\n");
 
-    for (;;) {
-        /* TODO: STOP until the next interrupt instead of spinning */
-    }
+    for (;;)
+        cpu_idle();
 }

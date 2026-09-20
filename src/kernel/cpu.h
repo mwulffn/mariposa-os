@@ -19,6 +19,11 @@ unsigned long cpu_int_disable(void);
  * the kernel use the critical section below instead. */
 void          cpu_int_enable(void);
 
+/* Halt until the next interrupt, with all levels unmasked. Returns after the
+ * handler has run. For the idle loop and for waiting on an interrupt; never
+ * inside a critical section, since it lowers the mask to 0. */
+void          cpu_idle(void);
+
 /*
  * Critical sections. Declares its own saved SR, so sections nest correctly
  * and an inner one cannot re-enable interrupts an outer one had masked.

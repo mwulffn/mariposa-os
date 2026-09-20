@@ -20,6 +20,7 @@
         xdef    _cpu_sr_set
         xdef    _cpu_int_disable
         xdef    _cpu_int_enable
+        xdef    _cpu_idle
 
 ; unsigned long cpu_sr_get(void) - current SR, zero extended
 ;
@@ -57,4 +58,15 @@ _cpu_int_disable:
 ; startup. Anything nested must save and restore instead - see cpu.h.
 _cpu_int_enable:
         move.w  #$2000,sr
+        rts
+
+; void cpu_idle(void) - stop the CPU until the next interrupt
+;
+; STOP loads SR and halts in one instruction, which is the whole point: a
+; separate "enable, then halt" has a window where the interrupt arrives
+; between the two and the halt then sleeps through the event it was waiting
+; for. It lowers the mask to 0, so this is for the idle loop and for code
+; that is waiting on an interrupt - never inside a critical section.
+_cpu_idle:
+        stop    #$2000
         rts

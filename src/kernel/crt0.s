@@ -12,6 +12,7 @@
         xdef    _stack_top
 
         xref    _kernel_main
+        xref    _ser_flush
         xref    __bss_start
         xref    __bss_end
 
@@ -51,7 +52,9 @@ _start:
         addq.l  #4,sp                   ; clean up argument
 
         ; kernel_main should never return
-        ; if it does, panic
+        ; if it does, panic - after getting queued output onto the wire,
+        ; since the ROM bangs the UART and knows nothing of the ring
+        jsr     _ser_flush
         move.l  _rom_panic,a0
         jmp     (a0)
 

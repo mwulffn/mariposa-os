@@ -14,6 +14,9 @@
  */
 void irq_init(void);
 
+/* Wrap the fault vectors so a crash flushes serial first. In vectors.s. */
+void trap_init(void);
+
 /* Vertical blanks seen since boot. Written by the ISR, so volatile. */
 extern volatile unsigned long vbl_count;
 

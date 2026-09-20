@@ -15,9 +15,11 @@ BUILD   = build
 
 # Output
 TARGET  = $(BUILD)/SYSTEM.BIN
+MAP     = $(BUILD)/kernel.map
+SYM     = $(BUILD)/kernel.sym
 
 # Sources
-ASRC    = crt0.s libsup.s cpu.s isr.s
+ASRC    = crt0.s libsup.s cpu.s isr.s vectors.s
 CSRC    = kernel.c mem.c serial.c kprintf.c irq.c
 
 # Shared with the ROM: hardware definitions and the UART register
@@ -32,13 +34,18 @@ CASM    = $(CSRC:%.c=$(BUILD)/%.asm)
 OBJ     = $(AOBJ) $(COBJ) $(SOBJ)
 
 # Rules
-all: $(TARGET)
+all: $(TARGET) $(SYM)
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
 $(TARGET): $(OBJ) kernel.ld | $(BUILD)
-	$(VLINK) $(VLINKFLAGS) -T kernel.ld -o $@ $(OBJ)
+	$(VLINK) $(VLINKFLAGS) -T kernel.ld -M -o $@ $(OBJ) > $(MAP)
+
+# Flat symbol table for the headless tests, which load this image and call
+# into it by name. Same route as the ROM: out of the linker map.
+$(SYM): $(TARGET)
+	@python3 ../../tests/mksym.py $(MAP) $(SYM)
 
 $(BUILD)/%.o: %.s | $(BUILD)
 	$(VASM) $(VASMFLAGS) -o $@ $<

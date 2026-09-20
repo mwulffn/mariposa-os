@@ -164,9 +164,12 @@ The IRQ line is **level triggered**, as on hardware: an interrupt stays
 asserted until the handler clears its `INTREQ` bit, so a handler that forgets
 to ack is re-entered the instant it `RTE`s. That needs
 `-DM68K_EMULATE_INT_ACK=1` on the Musashi build (see `tests/Makefile`) plus an
-int-ack callback returning `M68K_INT_ACK_AUTOVECTOR` — without the flag
-Musashi clears the line itself when it services the interrupt, which would
-quietly hide exactly that bug. `irq.unacked_reenters` is the test that pins
+int-ack callback — without the flag Musashi clears the line itself when it
+services the interrupt, which would quietly hide exactly that bug. The
+callback does not return `M68K_INT_ACK_AUTOVECTOR`: it reads the vector number
+from the ROM byte at `$FFFFF1 + 2*level`, as UAE's cycle-exact 68000 does, so
+a ROM missing Kickstart's closing `0018 ... 001F` table fails here and not
+first under FS-UAE. `irq.unacked_reenters` is the test that pins
 this down.
 
 Tests drive it with `h_write_intena()` / `h_raise()` and read the level back
@@ -191,8 +194,26 @@ standalone to origin zero, load it at `$100000` with `h_load_module()`, and
 merge its symbols with a matching bias via `h_add_symbols()`. No C cross
 compiler needed, so these run even where vbcc is not installed.
 
-The same mechanism will take `SYSTEM.BIN` once there is a reason to call into
-a built kernel.
+### Testing the kernel's C
+
+The same mechanism takes the real `SYSTEM.BIN`: `main.c` loads it at
+`$200000`, where it is linked, and merges `src/kernel/build/kernel.sym` (from
+the vlink map, like the ROM's) under a `kernel:` prefix -
+`h_sym("kernel:_ser_puts")`. The prefix is there because the kernel shares
+source with the ROM, symbol lookup is first match, and the ROM is loaded
+first. `.bss` lies past the end of the file and is just RAM, which `h_reset()`
+zeroes - crt0's job. Arguments follow vbcc: every one a longword, pushed
+right to left.
+
+This is not a copy built for the tests. `kser.*` runs the interrupt-driven
+serial driver out of the image that boots.
+
+Two pieces of the UART model exist for it. `h_serial_overruns()` counts
+writes to `SERDAT` while TBE was clear - each destroys a byte on the real
+chip, and the capture cannot show it because it records every write.
+`h_serial_set_timing()` slows the transmitter down: at the default 64 cycles
+a character no ring buffer ever fills, so the full-ring paths would never
+run.
 
 ### The disk tier
 
