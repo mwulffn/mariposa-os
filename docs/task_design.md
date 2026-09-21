@@ -145,18 +145,16 @@ knows only the 68000's bus error frame.
 
 ## Printing from tasks
 
-`kprintf` sends a character at a time, so two tasks printing at once used to
-interleave mid-line (`aBBaaaBBaa`, in the test that pins this). One call is
-now one critical section. That is affordable because `ser_putc` only queues,
-and it keeps `kprintf` usable from interrupt handlers, which a sleeping lock
-would not.
+`kprintf` formats a line into a buffer on its own stack and hands it to
+`ser_write` in one piece, which puts it into the transmit ring as a unit - so
+two tasks printing at once cannot interleave inside a line (`aBBaaaBBaa`, in
+the test that pins this). It works from handlers too. It costs the caller
+about 500 bytes of stack.
+
+A task that prints faster than the wire sleeps until the ring has drained;
+see `docs/serial_design.md`, "ser_write", for why that took three attempts.
 
 ## Not in the first cut
-
-- **Blocking on a full serial ring.** A task that outruns 9600 baud still
-  polls for room, with interrupts masked. It could sleep on a wait queue
-  instead, but `kprintf` must also work from handlers and inside critical
-  sections, so the blocking path needs care it has not had yet.
 
 - **A sleeping mutex.** `CRITICAL_ENTER` covers short sections. A lock that
   can be held across blocking arrives with its first real user, probably the

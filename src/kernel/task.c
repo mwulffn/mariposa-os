@@ -91,6 +91,11 @@ unsigned long sched_ticks(void)
     return vbl_count;
 }
 
+int sched_can_block(void)
+{
+    return started && isr_depth == 0;
+}
+
 struct task *task_current(void)
 {
     return current;

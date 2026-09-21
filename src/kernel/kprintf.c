@@ -9,7 +9,6 @@
 
 #include "kprintf.h"
 #include "serial.h"
-#include "cpu.h"
 #include "stdarg.h"
 
 extern void (*rom_panic)(void);
@@ -21,24 +20,31 @@ int kprintf_level = KL_INFO;
 
 /* Output context */
 struct output {
-    char *buf;           /* NULL for serial output */
+    char *buf;           /* Where characters go */
+    int serial;          /* buf is a staging buffer: flush to serial when
+                          * full, and expand \n to \r\n */
     unsigned long size;  /* Buffer size (0 = unlimited) */
     unsigned long pos;   /* Current position */
+    unsigned long total; /* serial: characters already flushed */
 };
 
 static void out_char(struct output *o, char c)
 {
-    if (o->buf) {
-        /* String output */
-        if (o->size == 0 || o->pos < o->size - 1) {
-            o->buf[o->pos] = c;
-        }
-    } else {
-        /* Serial output */
+    if (o->serial) {
         if (c == '\n')
-            ser_putc('\r');
-        ser_putc(c);
+            out_char(o, '\r');
+        if (o->pos == o->size) {
+            ser_write(o->buf, o->pos);
+            o->total += o->pos;
+            o->pos = 0;
+        }
+        o->buf[o->pos++] = c;
+        return;
     }
+
+    /* String output */
+    if (o->size == 0 || o->pos < o->size - 1)
+        o->buf[o->pos] = c;
     o->pos++;
 }
 
@@ -236,35 +242,47 @@ static int do_format(struct output *o, const char *fmt, va_list ap)
     return (int)o->pos;
 }
 
+/*
+ * A line is staged here and handed to ser_write() in one piece, which puts
+ * it into the transmit ring as a unit - so two tasks printing at once cannot
+ * interleave inside it ("aBBaaaBBaa" is what the test saw before anything
+ * prevented it).
+ *
+ * The first fix was to wrap the whole call in a critical section. That kept
+ * lines whole and was a mistake all the same: with the ring full, the call
+ * polled for room at 9600 baud with interrupts masked for the length of the
+ * line. Measured, under a flood of output: a lower priority task got no CPU
+ * at all, 52 ticks arrived of 799, and typed input was overrun. Formatting
+ * now happens with interrupts on, and only the copy into the ring is masked.
+ *
+ * Longer than the buffer, a line goes out in pieces, each whole. It lives
+ * on the caller's stack, so kprintf needs about 500 bytes of it - including
+ * from a handler, where the stack is whichever task was interrupted.
+ */
+#define STAGE_SIZE 128
+
 int kprintf(int level, const char *fmt, ...)
 {
+    char stage[STAGE_SIZE];
     struct output o;
     va_list ap;
-    int ret;
 
     if (level > kprintf_level)
         return 0;
 
-    o.buf = (char *)0;
-    o.size = 0;
+    o.buf = stage;
+    o.serial = 1;
+    o.size = sizeof stage;
     o.pos = 0;
+    o.total = 0;
 
-    /*
-     * One call, one critical section. Output goes out a character at a
-     * time, so without this two tasks printing at once interleave mid-line
-     * - "aBBaaaBBaa" is what the test saw. Masking is affordable because
-     * ser_putc only queues; it is a real wait only when the ring is full,
-     * and then the caller was going to wait regardless. A sleeping mutex
-     * would be kinder to interrupt latency and cannot be used from a
-     * handler, which kprintf has to be.
-     */
-    CRITICAL_ENTER();
     va_start(ap, fmt);
-    ret = do_format(&o, fmt, ap);
+    do_format(&o, fmt, ap);
     va_end(ap);
-    CRITICAL_EXIT();
 
-    return ret;
+    if (o.pos)
+        ser_write(stage, o.pos);
+    return (int)(o.total + o.pos);
 }
 
 int ksprintf(char *buf, const char *fmt, ...)
@@ -274,6 +292,8 @@ int ksprintf(char *buf, const char *fmt, ...)
     int ret;
 
     o.buf = buf;
+    o.serial = 0;
+    o.total = 0;
     o.size = 0;  /* Unlimited */
     o.pos = 0;
 
@@ -295,6 +315,8 @@ int ksnprintf(char *buf, unsigned long size, const char *fmt, ...)
         return 0;
 
     o.buf = buf;
+    o.serial = 0;
+    o.total = 0;
     o.size = size;
     o.pos = 0;
 

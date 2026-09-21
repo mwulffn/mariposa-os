@@ -27,6 +27,7 @@
         xdef    body_waker
         xdef    body_sampler
         xdef    body_caller2
+        xdef    body_masked_caller2
         xdef    isr_count_ack
         xdef    body_regs
         xdef    body_overflow
@@ -122,6 +123,11 @@ body_caller2:
         addq.l  #8,sp
         addq.l  #1,(a2)
         bra.s   .loop
+
+; The same from inside a critical section that never ends.
+body_masked_caller2:
+        move.w  #$2700,sr
+        bra.s   body_caller2
 
 ; Load every register with a value derived from param, then spin checking
 ; them. Preemption lands wherever it lands; if any register ever differs,

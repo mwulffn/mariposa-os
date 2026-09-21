@@ -74,6 +74,12 @@ void wake_all(struct waitq *q);
 
 unsigned long sched_ticks(void);
 
+/* May the caller sleep? Only a task can: not a handler, and not the kernel
+ * before sched_start. It says nothing about the caller's interrupt mask - a
+ * caller inside its own critical section must not sleep either, and only it
+ * knows. */
+int sched_can_block(void);
+
 /* For switch.s. */
 void  sched_tick(void);
 void *sched_switch(void *sp);

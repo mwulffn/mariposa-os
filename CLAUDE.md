@@ -149,7 +149,7 @@ test_*.py                     - FS-UAE integration scripts
 ## Testing
 
 ```bash
-make test                      # headless, 272 tests, ~0.3s, no emulator needed
+make test                      # headless, 282 tests, ~0.3s, no emulator needed
 make test FILTER=rom.panic     # narrow to one group while iterating
 ```
 
@@ -302,12 +302,10 @@ instead, and `mem.stack_*` pins it.
   `src/shared` rebuilds both the ROM and the kernel.
 - Keyboard input (CIA-A), level 2 PORTS interrupt. Needs the handshake pulse.
 - Serial receive and a console task are in (`docs/serial_design.md`,
-  "Receive"). Known weakness: `kprintf` with a full transmit ring polls with
-  interrupts masked for longer than a character time, so heavy output loses
-  typed input. It is counted (`irq` on the console shows overruns); the fix
-  is the blocking transmit path.
-- A sleeping mutex, with its first user. Tasks sleeping on a full serial
-  ring instead of polling. FPU context (the slot in `struct task` is
+  "Receive"). A task that prints faster than 9600 baud sleeps on the
+  transmit ring instead of polling it with interrupts masked, which used to
+  starve lower priorities, lose ticks and overrun typed input.
+- A sleeping mutex, with its first user. FPU context (the slot in `struct task` is
   reserved). All listed in `docs/task_design.md`.
 - Block I/O and FAT16 in the kernel. The ROM's copies are boot-time only, so
   once the kernel is running it cannot read a disk at all.

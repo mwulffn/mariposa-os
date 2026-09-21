@@ -76,32 +76,89 @@ void ser_irq_enable(void)
     CRITICAL_EXIT();
 }
 
-void ser_putc(char c)
+/* Queued bytes, and the most one ser_write() chunk may be: a writer waits
+ * for room for its whole chunk, so a chunk has to be able to fit. */
+#define RING_USED()  ((unsigned short)((head - tail) & RING_MASK))
+#define RING_FREE()  ((unsigned short)(RING_MASK - RING_USED()))
+#define CHUNK_MAX    256
+#define LOW_WATER    (SER_RING_SIZE / 2)    /* sleepers wake below this */
+
+static struct waitq tx_wait;
+
+/*
+ * Write a chunk as one unit: every byte goes into the ring inside a single
+ * critical section, so two writers cannot interleave within it. That is
+ * what keeps a kprintf line whole, and it is why kprintf no longer has to
+ * hold interrupts off for as long as the line takes to format and send.
+ *
+ * The question is what to do when the ring has no room, which with a task
+ * that prints faster than 9600 baud is nearly always.
+ *
+ * A task that may sleep, sleeps: on tx_wait, until the TBE handler has
+ * drained the ring to the low-water mark. The alternative - what this
+ * replaced - is to move bytes to the UART by polling with interrupts
+ * masked, which holds the whole machine at wire speed for the length of a
+ * line: lower priority tasks starve, ticks are lost, and received bytes are
+ * overrun in Paula's one-byte buffer.
+ *
+ * Everyone else still polls, because everyone else cannot sleep: a handler,
+ * the kernel before the scheduler starts, and - the subtle one - any caller
+ * that arrived with interrupts already masked. Sleeping would switch tasks
+ * in the middle of that caller's critical section and quietly hand its
+ * half-updated state to someone else.
+ */
+static void write_chunk(const unsigned char *p, unsigned short len)
 {
-    if (!irq_mode) {
-        while (!serial_hw_tx_ready())
-            ;
-        serial_hw_tx((unsigned char)c);
-        return;
+    unsigned long sr = cpu_int_disable();
+    int may_sleep = (sr & 0x0700) == 0 && sched_can_block();
+    unsigned short i;
+
+    while (RING_FREE() < len) {
+        if (may_sleep)
+            task_wait(&tx_wait);    /* comes back masked, as it left */
+        else
+            tx_pump_wait();
     }
 
-    CRITICAL_ENTER();
-
-    /* Full. The design doc says spin until the ISR makes room, which never
-     * returns if the caller has interrupts masked - kprintf in a critical
-     * section, or in an ISR. Do the ISR's job from here instead: order is
-     * kept because it is the same ring and the same end of it. */
-    while (ring_full())
-        tx_pump_wait();
-
-    ring[head] = (unsigned char)c;
-    head = (head + 1) & RING_MASK;
+    for (i = 0; i < len; i++) {
+        ring[head] = p[i];
+        head = (head + 1) & RING_MASK;
+    }
 
     /* Idle transmitter: this starts it. Busy: this does nothing, and the
-     * byte in flight raises the TBE that collects this one. With the CPU
+     * byte in flight raises the TBE that collects these. With the CPU
      * masked it is also the only thing keeping output moving. */
     tx_pump();
-    CRITICAL_EXIT();
+    cpu_sr_set(sr);
+}
+
+long ser_write(const void *buf, unsigned long len)
+{
+    const unsigned char *p = buf;
+    unsigned long left = len;
+
+    if (!irq_mode) {
+        for (; left; left--, p++) {
+            while (!serial_hw_tx_ready())
+                ;
+            serial_hw_tx(*p);
+        }
+        return (long)len;
+    }
+
+    while (left) {
+        unsigned short n = left > CHUNK_MAX ? CHUNK_MAX : (unsigned short)left;
+
+        write_chunk(p, n);
+        p += n;
+        left -= n;
+    }
+    return (long)len;
+}
+
+void ser_putc(char c)
+{
+    ser_write(&c, 1);
 }
 
 void ser_puts(const char *s)
@@ -118,10 +175,17 @@ void ser_tbe_isr(void *arg)
      * the two is a fresh request rather than a lost one. */
     custom.intreq = INTF_TBE;
 
-    /* Empty: go quiet. The next ser_putc restarts things. Not ready: a
-     * stale request, and the real one is still on its way. Both are
-     * tx_pump() doing nothing. */
+    /* Empty: go quiet. The next write restarts things. Not ready: a stale
+     * request, and the real one is still on its way. Both are tx_pump()
+     * doing nothing. */
     tx_pump();
+
+    /* Writers asleep on a full ring are woken at the low-water mark, not at
+     * the first free byte: a task that wakes per character has gained
+     * nothing over polling. All of them, since each wants a different
+     * amount and re-checks for itself. */
+    if (tx_wait.head && RING_USED() <= LOW_WATER)
+        wake_all(&tx_wait);
 }
 
 void ser_flush(void)
@@ -162,6 +226,7 @@ static volatile unsigned short rx_head;     /* the handler's */
 static volatile unsigned short rx_tail;     /* the readers' */
 static struct waitq rx_wait;
 
+volatile unsigned long ser_rx_total;        /* bytes taken from the UART */
 volatile unsigned long ser_rx_dropped;      /* ring full: nobody reading */
 volatile unsigned long ser_rx_overruns;     /* Paula's buffer overwritten */
 
@@ -174,6 +239,7 @@ void ser_rbf_isr(void *arg)
     if (serial_hw_rx_overrun())
         ser_rx_overruns++;
     c = serial_hw_rx();                     /* takes the byte and acks RBF */
+    ser_rx_total++;
 
     next = (rx_head + 1) & RX_MASK;
     if (next == rx_tail) {
@@ -216,16 +282,6 @@ long ser_read(void *buf, unsigned long len)
     }
     CRITICAL_EXIT();
     return n;
-}
-
-long ser_write(const void *buf, unsigned long len)
-{
-    const char *p = buf;
-    unsigned long i;
-
-    for (i = 0; i < len; i++)
-        ser_putc(p[i]);
-    return (long)len;
 }
 
 /* -------------------------------------------------------------- chardev --- */
@@ -279,7 +335,8 @@ void ser_init(void)
     head = tail = 0;
     rx_head = rx_tail = 0;
     rx_wait.head = rx_wait.tail = 0;
-    ser_rx_dropped = ser_rx_overruns = 0;
+    tx_wait.head = tx_wait.tail = 0;
+    ser_rx_total = ser_rx_dropped = ser_rx_overruns = 0;
     irq_mode = 0;
     dev_register(&ser0);        /* refused, harmlessly, on a second init */
 }

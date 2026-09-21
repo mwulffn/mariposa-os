@@ -32,11 +32,20 @@ void ser_init(void);
 void ser_irq_enable(void);
 
 /*
- * Output single character. Polled mode: blocks until the UART takes it.
- * Interrupt mode: queues and returns; if the ring is full, moves queued
- * bytes to the UART itself until there is room, so it can never deadlock
- * waiting for an interrupt that is masked.
+ * Output len bytes. Polled mode: blocks until the UART has taken them.
+ * Interrupt mode: queues them and returns. Each chunk of up to 256 bytes
+ * enters the ring as a unit, so concurrent writers never interleave inside
+ * one - a kprintf line stays a line.
+ *
+ * If the ring has no room: a task that can sleep does, until the ring has
+ * drained to half. A caller that cannot - a handler, anyone with interrupts
+ * already masked, anything before the scheduler starts - moves queued bytes
+ * to the UART itself until there is room, so it can never deadlock waiting
+ * for an interrupt that is masked.
  */
+long ser_write(const void *buf, unsigned long len);
+
+/* ser_write of one character. */
 void ser_putc(char c);
 
 /*
@@ -67,13 +76,13 @@ void ser_tbe_isr(void *arg);
  * many as are waiting, up to len. Task context only - it sleeps.
  */
 long          ser_read(void *buf, unsigned long len);
-long          ser_write(const void *buf, unsigned long len);
 unsigned long ser_rx_ready(void);
 void          ser_rbf_isr(void *arg);
 
 /* Bytes lost, and why: the ring was full because nobody was reading, or
  * Paula's one-byte buffer was overwritten because the handler was kept
  * waiting - some critical section ran longer than a character time. */
+extern volatile unsigned long ser_rx_total;      /* every byte received */
 extern volatile unsigned long ser_rx_dropped;
 extern volatile unsigned long ser_rx_overruns;
 

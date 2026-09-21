@@ -379,6 +379,133 @@ static void kprintf_lines_stay_whole(int model, uint32_t cpu)
     CHECK(lines > 6, "only %d complete lines", lines);
 }
 
+/* --- output that outruns the wire ------------------------------------------
+ *
+ * 9600 baud is about 7400 cycles a character and a task can produce text
+ * hundreds of times faster, so the transmit ring is full almost at once and
+ * stays full. What the producer does then is the whole question. Polling
+ * for room with interrupts masked - what this replaced - holds the CPU at
+ * wire speed for the length of a line: lower priority tasks never run,
+ * ticks are lost, and received bytes are overrun in Paula's one-byte buffer.
+ */
+#define FLOOD_LINE "0123456789abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ\n"
+
+static uint32_t start_flood(void)
+{
+    uint32_t b = block("kernel:_kprintf", 3, h_str(FLOOD_LINE), NULL);
+    spawn("flood", "body_caller2", b, 2048, PRIO_NORMAL);
+    h_serial_set_timing(7400, 14800);
+    return b;
+}
+
+static void full_ring_sleeps(int model, uint32_t cpu)
+{
+    uint32_t bg, expect;
+
+    setup(model, cpu);
+    start_flood();
+    bg = block(NULL, 0, 0, NULL);
+    spawn("bg", "body_spinner", bg, 1024, PRIO_LOW);    /* outranked */
+    run(SLICE * 4);
+
+    /* bg runs only while the flooder is asleep - which should be nearly
+     * always. A lone spinner manages a lap per 30 cycles on a 68000. It
+     * will not get all of them: output at 9600 baud is an interrupt per
+     * character, about a fifth of the machine, and this test ticks seven
+     * times faster than 50Hz. Polling, the answer was zero. */
+    expect = (uint32_t)(SLICE * 4 / 30);
+    CHECK(count(bg) > expect / 2,
+          "low priority task got %u laps of a possible ~%u", count(bg), expect);
+}
+
+static void ticks_survive_heavy_output(int model, uint32_t cpu)
+{
+    uint32_t expect;
+
+    setup(model, cpu);
+    start_flood();
+    run(SLICE * 4);
+
+    expect = (uint32_t)(SLICE * 4 / TICK);
+    CHECK(ticks() >= expect - 2, "%u ticks of %u: the rest were lost to "
+          "critical sections longer than a tick", ticks(), expect);
+}
+
+static void input_survives_heavy_output(int model, uint32_t cpu)
+{
+    const char *typed = "the quick brown fox jumps over the lazy dog";
+
+    setup(model, cpu);
+    start_flood();
+    run(SLICE);                                         /* ring is full now */
+
+    h_serial_rx_pacing(7400);
+    h_serial_input(typed);
+    run(SLICE * 2);
+
+    CHECK_U32(0, h_peek32(h_sym("kernel:_ser_rx_overruns")));
+    CHECK_U32(0, h_peek32(h_sym("kernel:_ser_rx_dropped")));
+    CHECK_U32(43, h_peek32(h_sym("kernel:_ser_rx_total")));
+}
+
+/*
+ * The caller that must NOT sleep: one that arrived with interrupts masked.
+ * It is inside a critical section of its own, and switching tasks there
+ * hands its half-updated state to whoever runs next. So it polls, as
+ * before - seen here as a second task that never gets a look in.
+ */
+static void masked_writer_never_sleeps(int model, uint32_t cpu)
+{
+    uint32_t w, other;
+
+    setup(model, cpu);
+    h_serial_set_timing(2000, 4000);
+    w = block("kernel:_kprintf", 3, h_str(FLOOD_LINE), NULL);
+    other = block(NULL, 0, 0, NULL);
+    spawn("masked", "body_masked_caller2", w, 2048, PRIO_NORMAL);
+    spawn("other", "body_spinner", other, 1024, PRIO_NORMAL);
+    run(SLICE * 2);
+
+    CHECK(count(w) > 20, "masked writer made no progress: %u lines", count(w));
+    CHECK_U32(0, count(other));
+    CHECK_U32(0, h_serial_overruns());
+}
+
+/* Blocking must not cost correctness: every line whole, none lost, none
+ * reordered, two producers at once. */
+static void flood_output_is_intact(int model, uint32_t cpu)
+{
+    const char *p, *nl;
+    uint32_t a, b;
+    int lines = 0;
+
+    setup(model, cpu);
+    a = block("kernel:_kprintf", 3, h_str("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"), NULL);
+    b = block("kernel:_kprintf", 3, h_str("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"), NULL);
+    spawn("a", "body_caller2", a, 2048, PRIO_NORMAL);
+    spawn("b", "body_caller2", b, 2048, PRIO_NORMAL);
+    h_serial_set_timing(2000, 4000);
+    run(SLICE * 6);
+
+    CHECK_U32(0, h_serial_overruns());
+    for (p = h_serial(); (nl = strchr(p, '\n')) != NULL; p = nl + 1, lines++) {
+        size_t len = (size_t)(nl - p);
+        const char *c;
+        if (len != (*p == 'a' ? 61u : 41u)) {           /* text + \r */
+            t_fail("line %d is %u long: %.*s", lines, (unsigned)len, (int)len, p);
+            return;
+        }
+        for (c = p; c < nl - 1; c++)
+            if (*c != *p) {
+                t_fail("line %d is mixed: %.*s", lines, (int)len, p);
+                return;
+            }
+    }
+    CHECK(lines > 100, "only %d lines", lines);
+    CHECK(count(a) > 20 && count(b) > 20, "one producer starved: a=%u b=%u",
+          count(a), count(b));
+}
+
 /*
  * What the whole stack was built for: a task blocked on input costs nothing
  * until a byte arrives, and then runs at once. RBF interrupt -> ring ->
@@ -556,6 +683,11 @@ ON(exit_is_reaped)
 ON(wait_and_wake)
 ON(wake_all_wakes_all)
 ON(kprintf_lines_stay_whole)
+ON(full_ring_sleeps)
+ON(ticks_survive_heavy_output)
+ON(input_survives_heavy_output)
+ON(masked_writer_never_sleeps)
+ON(flood_output_is_intact)
 ON(read_blocks_until_input)
 ON(console_answers)
 ON(console_line_editing)
@@ -586,6 +718,11 @@ static const test_case tests[] = {
     T("wait_and_wake",      wait_and_wake),
     T("wake_all",           wake_all_wakes_all),
     T("kprintf_lines_whole", kprintf_lines_stay_whole),
+    T("full_ring_sleeps",   full_ring_sleeps),
+    T("ticks_survive_output", ticks_survive_heavy_output),
+    T("input_survives_output", input_survives_heavy_output),
+    T("masked_writer_polls", masked_writer_never_sleeps),
+    T("flood_output_intact", flood_output_is_intact),
     T("read_blocks_until_input", read_blocks_until_input),
     T("console_answers",    console_answers),
     T("console_line_editing", console_line_editing),

@@ -78,30 +78,59 @@ buffer is free". The ROM polls the same UART, INTREQ bits can be set by
 software, and a request can be left over from either; writing SERDAT with a
 byte still in the buffer destroys that byte silently.
 
-### ser_putc
+### ser_write
+
+`ser_write(buf, len)` is the transmit entry point; `ser_putc` is a write of
+one byte. Output is split into chunks of at most 256 bytes and each chunk
+goes through `write_chunk`:
 
 1. Save SR, disable interrupts
-2. While the ring is full: poll until TBE, then tx_pump
-3. Write byte to the ring, advance head
+2. While the ring has no room for the whole chunk: wait (see below)
+3. Copy the chunk into the ring, advance head
 4. tx_pump
 5. Restore SR
 
-`\n` expansion is kprintf's job, not the driver's.
+**A chunk enters the ring as a unit**, inside one critical section, so two
+writers cannot interleave within it. That is what keeps a `kprintf` line
+whole: `kprintf` formats into a 128-byte buffer on its own stack with
+interrupts on, and hands the result to `ser_write` in one piece. `\n`
+expansion is kprintf's job, not the driver's.
 
 **Step 4 is how the transmitter starts.** TBE is raised by a byte leaving the
 buffer and by nothing else. Once the ISR has acknowledged the last one and
 found the ring empty, no request is left to fire - so the first draft's
 "enable the TBE interrupt" in ser_putc, paired with "disable it when empty"
 in the ISR, sends one burst and then waits for ever. Instead INTENA's TBE bit
-stays on permanently, and every ser_putc offers the UART a byte itself: on an
+stays on permanently, and every write offers the UART a byte itself: on an
 idle transmitter that starts it; on a busy one tx_pump does nothing and the
 byte in flight raises the TBE that carries on.
 
-**Step 2 is why a full ring cannot deadlock.** The first draft said to
-spin-wait for the ISR to make room, which never returns when the caller has
-interrupts masked - kprintf inside a critical section or an ISR. Doing the
-ISR's job by polling keeps order, because it is the same ring and the same
-end of it. Step 4 also keeps output moving while the CPU is masked.
+**Step 2 is where the design has been wrong twice.**
+
+The first draft said to spin until the ISR makes room, which never returns
+when the caller has interrupts masked. The second version did the ISR's job
+by polling from the caller - correct, and with `kprintf` holding a critical
+section across the whole line, ruinous: a task printing faster than 9600
+baud fills the ring at once, and from then on every line was sent by
+polling at wire speed with interrupts masked. Measured under a flood of
+output: a lower priority task got no CPU at all, 52 ticks arrived of 799,
+and typed input was overrun in Paula's one-byte buffer.
+
+Now it depends on who is asking:
+
+- **A task that may sleep, sleeps**, on `tx_wait`. The TBE handler wakes all
+  sleepers when the ring has drained to half - not at the first free byte,
+  where a task woken per character has gained nothing over polling, and
+  where one of two producers was seen to starve the other.
+- **Everyone else polls**, as before, because everyone else cannot sleep: a
+  handler; the kernel before `sched_start`; and any caller that arrived with
+  interrupts already masked. That last one is the subtle one. It is inside a
+  critical section of its own, and sleeping would switch tasks in the middle
+  of it and hand its half-updated state to whoever runs next. `write_chunk`
+  reads the caller's mask from the SR it saved.
+
+Sustained output is still not free: at 9600 baud it is an interrupt per
+character through the dispatcher, roughly a fifth of a 68000.
 
 ### TBE ISR (Level 1)
 
@@ -111,6 +140,7 @@ The assembly stub `ser_tbe_handler` raises the mask to 7, saves D0/D1/A0/A1
 1. Acknowledge TBE - before looking, so a byte that frees the buffer between
    the two is a fresh request and not a lost one
 2. tx_pump
+3. If writers are asleep and the ring is at or below half full, wake them all
 
 Ring empty: nothing happens and the transmitter goes quiet. UART not ready: a
 stale request; the real one is still coming. Both are tx_pump doing nothing.
@@ -191,11 +221,11 @@ cable:
 - `ser_rx_dropped` - the ring was full. Nobody was reading. The newest byte
   is the one dropped, so what was typed first survives.
 
-The likeliest cause of overruns today is `kprintf` itself: one call is one
-critical section, and with the transmit ring full it polls at wire speed
-with interrupts masked. Typing at a console while the kernel is printing
-heavily will lose characters. The fix is the blocking transmit path listed
-in `docs/task_design.md`.
+The cause of overruns used to be `kprintf` itself, polling a full transmit
+ring with interrupts masked; see `ser_write` above. What remains is any
+caller that prints at length from inside its own critical section - the
+console's `ps` is one, deliberately, to list tasks that are not changing
+under it.
 
 After a crash the ROM debugger polls the same UART with interrupts masked,
 so the two never compete.
