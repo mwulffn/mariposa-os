@@ -5,7 +5,9 @@
 > with the console's `keys` command: keys, qualifiers and repeat arrive as
 > they should. **Dead keys have only ever run in the harness** - no dead key
 > could be found through the emulator's host key mapping - so they, and the
-> Danish table as a whole, are still to be confirmed on real hardware. Mouse and joystick are not
+> Danish table as a whole, are still to be confirmed on real hardware. The
+> boot console's `con0` device (`docs/display_design.md`) is the first real
+> consumer of key events. Mouse and joystick are not
 > started. Nothing consumes events yet except that command - there is no
 > screen console to type into.
 

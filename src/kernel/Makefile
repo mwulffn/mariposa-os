@@ -19,9 +19,10 @@ MAP     = $(BUILD)/kernel.map
 SYM     = $(BUILD)/kernel.sym
 
 # Sources
-ASRC    = crt0.s libsup.s cpu.s isr.s vectors.s switch.s
+ASRC    = crt0.s libsup.s cpu.s isr.s vectors.s switch.s dcon_draw.s
 CSRC    = kernel.c mem.c serial.c kprintf.c irq.c vector.c task.c dev.c console.c kstring.c \
-          cia.c kbd.c input.c keymap.c
+          cia.c kbd.c input.c keymap.c \
+          display.c dcon.c font8x8.c
 
 # Shared with the ROM: hardware definitions and the UART register
 # primitives. The waiting strategy is not shared - see serial_hw.h.

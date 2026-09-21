@@ -24,6 +24,9 @@ int kprintf(int level, const char *fmt, ...);
 /*
  * Convenience macros
  */
+/* A second destination for everything kprintf prints, or NULL. */
+extern void (*kprintf_sink)(const char *buf, unsigned long len, int level);
+
 #define pr_emerg(...) kprintf(KL_EMERG, __VA_ARGS__)
 #define pr_err(...)   kprintf(KL_ERR,   __VA_ARGS__)
 #define pr_warn(...)  kprintf(KL_WARN,  __VA_ARGS__)

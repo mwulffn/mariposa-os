@@ -282,6 +282,23 @@ int h_irq_level(void);
  * and overridden by the next INTENA/INTREQ write. */
 void h_irq_force(int level);
 
+/* --- custom chip registers, and the copper ---------------------------------
+ *
+ * The chipset's write-only registers do nothing here, but every write is
+ * remembered: h_custom(reg) is the last value written to the register at
+ * that offset from $DFF000, h_custom_writes(reg) how many times it has been
+ * written since h_reset. A long write counts as the two registers it is.
+ *
+ * h_copper_at() is a copper: it runs the list at `list` from the top of the
+ * frame down to raster line `line` and fills regs[] - indexed by register
+ * offset / 2 - with what each register holds there. MOVE and WAIT, vertical
+ * position only, and the $FFDF idiom for lines past 255. Returns -1 if the
+ * list never ends. That is what lets a test ask "which bitmap row is on
+ * screen at line 140, in which colours" instead of comparing list bytes. */
+uint16_t h_custom(uint32_t reg);
+unsigned h_custom_writes(uint32_t reg);
+int      h_copper_at(uint32_t list, int line, uint16_t regs[0x100]);
+
 /* --- keyboard --------------------------------------------------------------
  *
  * A keyboard on CIA-A's serial port. h_key() queues a raw code - bit 7 set

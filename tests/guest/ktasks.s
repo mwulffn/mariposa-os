@@ -29,6 +29,7 @@
         xdef    body_caller2
         xdef    body_masked_caller2
         xdef    isr_count_ack
+        xdef    notify_record
         xdef    body_regs
         xdef    body_overflow
 
@@ -217,4 +218,14 @@ isr_count_ack:
         move.l  4(sp),a0
         addq.l  #1,(a0)
         move.w  10(a0),$DFF09C          ; low word of param; bit 15 clear = CLR
+        rts
+
+; A display ownership callback, for kdisp.*: void notify(void *owner, ulong
+; what). The owner is a block the test made; count each kind of notice in
+; it, at what * 4. DISPLAY_LOST is 1 and DISPLAY_RESTORED is 2.
+notify_record:
+        move.l  4(sp),a0
+        move.l  8(sp),d0
+        lsl.l   #2,d0
+        addq.l  #1,0(a0,d0.l)
         rts

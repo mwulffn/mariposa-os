@@ -13,6 +13,7 @@
 #include "vector.h"
 #include "cpu.h"
 #include "input.h"
+#include "display.h"
 
 extern void irq_level1(void), irq_level2(void), irq_level3(void);
 extern void irq_level4(void), irq_level5(void), irq_level6(void);
@@ -91,6 +92,7 @@ static void tick_isr(void *arg)
     vbl_count++;
     sched_tick();
     input_tick();               /* key repeat */
+    display_vblank();           /* copper list swap, vblank sleepers */
 }
 
 void irq_init(void)

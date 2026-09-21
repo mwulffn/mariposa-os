@@ -26,6 +26,7 @@ extern const test_suite kmem_suite;
 extern const test_suite task_suite;
 extern const test_suite kirq_suite;
 extern const test_suite kinput_suite;
+extern const test_suite kdisplay_suite;
 
 /*
  * Position-independent kernel assembly, assembled to origin zero and loaded
@@ -104,7 +105,7 @@ int main(int argc, char **argv)
                                       disk_suite, kserial_suite,
                                       boot_suite, kmem_suite,
                                       task_suite, kirq_suite,
-                                      kinput_suite };
+                                      kinput_suite, kdisplay_suite };
         rc = run_suites(suites, sizeof suites / sizeof suites[0], filter);
     }
 

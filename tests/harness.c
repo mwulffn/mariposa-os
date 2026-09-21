@@ -880,6 +880,17 @@ static uint32_t custom_read(uint32_t addr, int size)
     return 0;
 }
 
+static uint16_t g_custom_last[0x100];
+static unsigned g_custom_count[0x100];
+
+static void custom_note(uint32_t off, uint16_t val)
+{
+    if (off < 0x200) {
+        g_custom_last[off >> 1] = val;
+        g_custom_count[off >> 1]++;
+    }
+}
+
 static void custom_write(uint32_t addr, int size, uint32_t val)
 {
     uint32_t off = addr - CUSTOM_BASE;
@@ -901,8 +912,47 @@ static void custom_write(uint32_t addr, int size, uint32_t val)
     if (off == REG_INTENA) { h_write_intena((uint16_t)val); return; }
     if (off == REG_INTREQ) { h_write_intreq((uint16_t)val); return; }
 
-    /* SERPER, COLOR00, DMACON, bitplane and copper registers: the routines
-     * under test write these freely and nothing reads them back. */
+    /* Everything else - SERPER, COLOR00, DMACON, the bitplane and copper
+     * registers - does nothing here, but is remembered: the display tests
+     * want to know what the chipset was told, and when. A long write is two
+     * registers, as it is on the bus. */
+    if (size == 4) {
+        custom_note(off, (uint16_t)(val >> 16));
+        custom_note(off + 2, (uint16_t)val);
+    } else {
+        custom_note(off, (uint16_t)val);
+    }
+}
+
+uint16_t h_custom(uint32_t reg)        { return reg < 0x200 ? g_custom_last[reg >> 1] : 0; }
+unsigned h_custom_writes(uint32_t reg) { return reg < 0x200 ? g_custom_count[reg >> 1] : 0; }
+
+/*
+ * A copper, as far as a display test needs one: run a list from the top of
+ * the frame down to `line` and report what every register holds there. MOVE
+ * and WAIT only; vertical position only. Lines past 255 are reached the way
+ * real lists reach them - a wait for $FFDF, after which the 8-bit vertical
+ * counter has wrapped and positions are relative to line 256.
+ */
+int h_copper_at(uint32_t list, int line, uint16_t regs[0x100])
+{
+    int base = 0, n;
+
+    memset(regs, 0, 0x100 * sizeof regs[0]);
+    for (n = 0; n < 4096; n++, list += 4) {
+        uint16_t w1 = h_peek16(list), w2 = h_peek16(list + 2);
+
+        if (w1 == 0xFFFF && w2 == 0xFFFE)
+            return 0;                           /* end of list */
+        if (!(w1 & 1)) {
+            regs[(w1 & 0x1FE) >> 1] = w2;       /* MOVE */
+        } else if (!(w2 & 1)) {                 /* WAIT */
+            if (w1 == 0xFFDF) { base = 256; continue; }
+            if (base + (w1 >> 8) > line)
+                return 0;
+        }
+    }
+    return -1;                                  /* no end: not a copper list */
 }
 
 /* ------------------------------------------------------- Musashi callbacks */
@@ -1353,6 +1403,8 @@ void h_reset(void)
     g_rx_pace = 0;
     g_rx_ovrun = 0;
     cia_reset();
+    memset(g_custom_last, 0, sizeof g_custom_last);
+    memset(g_custom_count, 0, sizeof g_custom_count);
 
     memset(g_chip, 0, H_CHIP_SIZE);
     memset(g_fast, 0, H_FAST_SIZE);

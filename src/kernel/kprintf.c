@@ -14,6 +14,11 @@
 extern void (*rom_panic)(void);
 
 
+/* Where output goes besides serial, if anywhere: the screen console sets
+ * this. A pointer and not a call, so that kprintf does not drag the display
+ * into every build that prints. */
+void (*kprintf_sink)(const char *buf, unsigned long len, int level);
+
 /* Default: show everything up to INFO */
 int kprintf_level = KL_INFO;
 
@@ -26,6 +31,7 @@ struct output {
     unsigned long size;  /* Buffer size (0 = unlimited) */
     unsigned long pos;   /* Current position */
     unsigned long total; /* serial: characters already flushed */
+    int level;           /* serial: KL_*, for the sink */
 };
 
 static void out_char(struct output *o, char c)
@@ -35,6 +41,8 @@ static void out_char(struct output *o, char c)
             out_char(o, '\r');
         if (o->pos == o->size) {
             ser_write(o->buf, o->pos);
+            if (kprintf_sink)
+                kprintf_sink(o->buf, o->pos, o->level);
             o->total += o->pos;
             o->pos = 0;
         }
@@ -275,13 +283,17 @@ int kprintf(int level, const char *fmt, ...)
     o.size = sizeof stage;
     o.pos = 0;
     o.total = 0;
+    o.level = level;
 
     va_start(ap, fmt);
     do_format(&o, fmt, ap);
     va_end(ap);
 
-    if (o.pos)
+    if (o.pos) {
         ser_write(stage, o.pos);
+        if (kprintf_sink)
+            kprintf_sink(stage, o.pos, level);
+    }
     return (int)(o.total + o.pos);
 }
 

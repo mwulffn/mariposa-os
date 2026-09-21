@@ -13,6 +13,8 @@
 #include "input.h"
 #include "cia.h"
 #include "kbd.h"
+#include "display.h"
+#include "dcon.h"
 #include "vector.h"
 #include "irq.h"
 #include "cpu.h"
@@ -176,6 +178,14 @@ void kernel_main(struct bootinfo *bi)
     bootinfo = bi;
     memmap = bi->memmap;
 
+    /* Memory first, and the screen straight after it, so that everything
+     * the kernel has to say from here on is said on the screen as well as
+     * down the serial line. Nothing is drawn until dcon_render(). */
+    mem_init(memmap, &_end);
+    display_init();
+    if (dcon_init() != 0)
+        pr_info("No screen console: no chip RAM for it\n");
+
     pr_info("\n");
     pr_info("Kernel starting successfully!\n");
     pr_info("Boot info v%u, %u bytes, from ROM v%u\n", (unsigned)bi->version,
@@ -187,9 +197,6 @@ void kernel_main(struct bootinfo *bi)
 
     /* Print memory map received from ROM */
     print_memory_map(memmap);
-
-    /* Initialize memory allocator */
-    mem_init(memmap, &_end);
 
     pr_info("Memory system initialized\n");
     pr_info("Fast RAM free: %lu bytes\n", mem_avail_fast());
@@ -211,6 +218,8 @@ void kernel_main(struct bootinfo *bi)
     sched_init(BOOTINFO_HAS(bi, cpu_type) ? bi->cpu_type : CPU_68000);
     pr_info("CPU: 680%02lu%s\n", cpu_type == CPU_68000 ? 0UL : cpu_type * 10,
             BOOTINFO_HAS(bi, fpu_type) && bi->fpu_type ? " with FPU" : "");
+    dcon_render();              /* by hand: the task that does it is not yet */
+
     irq_init();
 
     /* Input, bottom up: the event layer, the CIA that the keyboard hangs
@@ -221,6 +230,7 @@ void kernel_main(struct bootinfo *bi)
 
     cpu_int_enable();
 
+    dcon_start();
     if (console_init() != 0)
         pr_info("WARNING: no console\n");
 

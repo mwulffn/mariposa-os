@@ -6,9 +6,10 @@
  * nothing until somebody types, and it talks to a chardev and not to
  * serial.c, so the same code will sit on a screen console when there is one.
  *
- * Output goes through kprintf, which today means serial whatever device the
- * console reads from. That is one device and the same one; when there are
- * two, kprintf needs a notion of where the console is.
+ * Command output goes through kprintf, so it appears on every console there
+ * is - serial and screen - whichever one the command was typed at. The
+ * prompt and the echo of the line being typed are private to a console; two
+ * of them sharing a screen otherwise greet you with "amag> amag> ".
  */
 #include "console.h"
 #include "chardev.h"
@@ -25,12 +26,11 @@
 #define LINE_MAX 80
 #define PROMPT   "amag> "
 
-static struct device *con;
-
 /* ------------------------------------------------------------- commands --- */
 
-static void cmd_mem(const char *arg)
+static void cmd_mem(struct device *con, const char *arg)
 {
+    (void)con;
     (void)arg;
     unsigned long rc;
 
@@ -47,8 +47,9 @@ static void cmd_mem(const char *arg)
         pr_info("heap check: FAILED, code %lu\n", rc);
 }
 
-static void cmd_ps(const char *arg)
+static void cmd_ps(struct device *con, const char *arg)
 {
+    (void)con;
     (void)arg;
     static const char *const state[] = {
         "ready", "running", "sleeping", "waiting", "dead"
@@ -69,8 +70,9 @@ static void cmd_ps(const char *arg)
     CRITICAL_EXIT();
 }
 
-static void cmd_dev(const char *arg)
+static void cmd_dev(struct device *con, const char *arg)
 {
+    (void)con;
     (void)arg;
     static const char *const class[] = { "?", "char", "block", "input" };
     struct device *d;
@@ -79,8 +81,9 @@ static void cmd_dev(const char *arg)
         pr_info("%-8s %s\n", d->name, class[d->class <= DEV_INPUT ? d->class : 0]);
 }
 
-static void cmd_irq(const char *arg)
+static void cmd_irq(struct device *con, const char *arg)
 {
+    (void)con;
     (void)arg;
     pr_info("ticks %lu (%lu s), spurious interrupts %lu\n",
             sched_ticks(), sched_ticks() / 50, irq_spurious);
@@ -91,7 +94,7 @@ static void cmd_irq(const char *arg)
 /* Show key events as they happen, until a byte arrives on the console - not
  * until a key, because the point is to find out whether keys work. Polls
  * both, at tick rate: there is no way yet to block on two things at once. */
-static void cmd_keys(const char *arg)
+static void cmd_keys(struct device *con, const char *arg)
 {
     static const char *const what[] = { "up", "down", "repeat" };
     struct input_event ev;
@@ -118,7 +121,7 @@ static void cmd_keys(const char *arg)
             input_dropped, kbd_protocol_codes, kbd_reset_warnings);
 }
 
-static void cmd_keymap(const char *arg)
+static void cmd_keymap(struct device *con, const char *arg)
 {
     if (*arg && input_set_keymap(arg) != 0)
         pr_info("no keymap '%s' - there is us and dk\n", arg);
@@ -129,8 +132,9 @@ extern void (*rom_panic)(void);
 
 /* Into the ROM debugger, on purpose, from a kernel that is fine. The flush
  * first, because the ROM bangs the UART and knows nothing of the ring. */
-static void cmd_debug(const char *arg)
+static void cmd_debug(struct device *con, const char *arg)
 {
+    (void)con;
     (void)arg;
     pr_info("entering the ROM debugger\n");
     ser_flush();
@@ -138,11 +142,11 @@ static void cmd_debug(const char *arg)
     rom_panic();
 }
 
-static void cmd_help(const char *arg);
+static void cmd_help(struct device *con, const char *arg);
 
 static const struct {
     const char *name;
-    void (*run)(const char *arg);
+    void (*run)(struct device *con, const char *arg);
     const char *help;
 } commands[] = {
     { "help", cmd_help, "this list" },
@@ -157,8 +161,9 @@ static const struct {
 
 #define NCOMMANDS (sizeof commands / sizeof commands[0])
 
-static void cmd_help(const char *arg)
+static void cmd_help(struct device *con, const char *arg)
 {
+    (void)con;
     (void)arg;
     unsigned int i;
 
@@ -166,7 +171,7 @@ static void cmd_help(const char *arg)
         pr_info("%-7s %s\n", commands[i].name, commands[i].help);
 }
 
-static void run_line(char *line)
+static void run_line(struct device *con, char *line)
 {
     char *arg = line;
     unsigned int i;
@@ -182,7 +187,7 @@ static void run_line(char *line)
 
     for (i = 0; i < NCOMMANDS; i++)
         if (str_eq(commands[i].name, line)) {
-            commands[i].run(arg);
+            commands[i].run(con, arg);
             return;
         }
     pr_info("unknown command '%s' - try help\n", line);
@@ -192,21 +197,21 @@ static void run_line(char *line)
 
 static void console_task(void *arg)
 {
+    struct device *con = arg;
     char line[LINE_MAX];
     unsigned int n = 0;
     char c;
 
-    (void)arg;
-    pr_info(PROMPT);
+    chr_write(con, PROMPT, sizeof PROMPT - 1);
     for (;;) {
         chr_read(con, &c, 1);
 
         if (c == '\r' || c == '\n') {
             chr_write(con, "\r\n", 2);
             line[n] = '\0';
-            run_line(line);
+            run_line(con, line);
             n = 0;
-            pr_info(PROMPT);
+            chr_write(con, PROMPT, sizeof PROMPT - 1);
         } else if (c == '\b' || c == 0x7F) {
             if (n) {
                 n--;
@@ -219,12 +224,22 @@ static void console_task(void *arg)
     }
 }
 
+/* One console per character device that exists: the serial line, and the
+ * keyboard and screen. They share everything but the line being typed, and
+ * what a command prints goes to both, because kprintf does. */
+static int start_on(const char *devname, const char *taskname)
+{
+    struct device *dev = dev_find(devname);
+
+    if (!dev || dev->class != DEV_CHAR)
+        return -1;
+    return task_create(taskname, console_task, dev, 4096, TASK_PRIO_HIGH) ? 0 : -1;
+}
+
 int console_init(void)
 {
-    con = dev_find("ser0");
-    if (!con || con->class != DEV_CHAR)
-        return -1;
-    if (!task_create("console", console_task, 0, 4096, TASK_PRIO_HIGH))
-        return -1;
-    return 0;
+    int serial = start_on("ser0", "console");
+
+    start_on("con0", "console-kbd");        /* absent without a screen */
+    return serial;
 }
