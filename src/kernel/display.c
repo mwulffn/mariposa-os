@@ -27,108 +27,6 @@
 
 #define FIRST_LINE     0x2C             /* raster line of display line 0 */
 
-/* ---------------------------------------------------------------- bitmaps --- */
-
-#define MAX_BITMAPS 32
-
-static struct {
-    struct bitmap_info info;
-    void              *owner;
-    unsigned char     *memory;          /* one allocation, all planes */
-    unsigned char      used;
-    unsigned char      generation;      /* so a stale handle is not a valid one */
-} bitmaps[MAX_BITMAPS];
-
-/* handle = generation << 8 | slot + 1 */
-static int slot_of(bitmap_t bm)
-{
-    unsigned long slot = (bm & 0xFF) - 1;
-
-    if (bm == 0 || slot >= MAX_BITMAPS || !bitmaps[slot].used ||
-        bitmaps[slot].generation != ((bm >> 8) & 0xFF))
-        return -1;
-    return (int)slot;
-}
-
-bitmap_t bitmap_alloc(unsigned long width, unsigned long height,
-                      unsigned long depth, void *owner)
-{
-    unsigned long bpr, plane_size, i;
-    unsigned char *mem;
-    int slot;
-
-    if (width == 0 || width > 2048 || (width & 15) || height == 0 ||
-        height > 2048 || depth == 0 || depth > BITMAP_MAX_DEPTH)
-        return 0;
-
-    bpr = width / 8;
-    plane_size = bpr * height;
-    mem = mem_alloc_tagged(plane_size * depth, ALLOC_CHIP, owner);
-    if (!mem)
-        return 0;
-    for (i = 0; i < plane_size * depth; i++)
-        mem[i] = 0;
-
-    CRITICAL_ENTER();
-    for (slot = 0; slot < MAX_BITMAPS && bitmaps[slot].used; slot++)
-        ;
-    if (slot < MAX_BITMAPS) {
-        bitmaps[slot].used = 1;
-        bitmaps[slot].generation++;
-        bitmaps[slot].owner  = owner;
-        bitmaps[slot].memory = mem;
-        bitmaps[slot].info.width  = (unsigned short)width;
-        bitmaps[slot].info.height = (unsigned short)height;
-        bitmaps[slot].info.depth  = (unsigned short)depth;
-        bitmaps[slot].info.bytes_per_row = (unsigned short)bpr;
-        for (i = 0; i < BITMAP_MAX_DEPTH; i++)
-            bitmaps[slot].info.planes[i] = i < depth ? mem + i * plane_size : 0;
-    }
-    CRITICAL_EXIT();
-
-    if (slot == MAX_BITMAPS) {
-        mem_free(mem);
-        return 0;
-    }
-    return ((bitmap_t)bitmaps[slot].generation << 8) | (unsigned long)(slot + 1);
-}
-
-int bitmap_free(bitmap_t bm)
-{
-    unsigned char *mem = 0;
-    int slot;
-
-    CRITICAL_ENTER();
-    slot = slot_of(bm);
-    if (slot >= 0) {
-        mem = bitmaps[slot].memory;
-        bitmaps[slot].used = 0;
-    }
-    CRITICAL_EXIT();
-
-    /* A bitmap still on screen goes on being read by bitplane DMA after
-     * this. That is reading freed memory, which shows garbage and harms
-     * nothing; the owner's next program puts it right. */
-    if (!mem)
-        return -1;
-    mem_free(mem);
-    return 0;
-}
-
-int bitmap_info(bitmap_t bm, struct bitmap_info *out)
-{
-    int slot, rc = -1;
-
-    CRITICAL_ENTER();
-    slot = slot_of(bm);
-    if (slot >= 0) {
-        *out = bitmaps[slot].info;
-        rc = 0;
-    }
-    CRITICAL_EXIT();
-    return rc;
-}
-
 /* ------------------------------------------------------------- the stack --- */
 
 #define MAX_OWNERS 4
@@ -138,7 +36,7 @@ struct holder {
     unsigned long     flags;
     display_notify_fn notify;
     unsigned long     nbands;
-    unsigned short    background;
+    colour_t          background;
     struct display_band bands[DISPLAY_MAX_BANDS];
 };
 
@@ -195,12 +93,24 @@ static void wait_line(unsigned int line)
     *cp++ = 0xFFFE;
 }
 
+/* A system colour is 24-bit; OCS has four bits a gun. Truncated, not
+ * rounded: $FF must stay $F and $00 must stay $0, and rounding $F8 up has
+ * nowhere to go. */
+static unsigned short ocs(colour_t c)
+{
+    return (unsigned short)(((c >> 12) & 0xF00) | ((c >> 8) & 0x0F0) | ((c >> 4) & 0x00F));
+}
+
 static void set_pointers(const struct bitmap_info *bi, unsigned long row)
 {
+    unsigned long offset = 0;
     unsigned int p;
 
+    while (row--)
+        offset += bi->row_step;         /* rows are row_step apart, not bytes_per_row */
+
     for (p = 0; p < bi->depth; p++) {
-        unsigned long addr = (unsigned long)bi->planes[p] + row * bi->bytes_per_row;
+        unsigned long addr = (unsigned long)bi->planes[p] + offset;
 
         move((unsigned short)(R_BPL1PTH + p * 4), (unsigned short)(addr >> 16));
         move((unsigned short)(R_BPL1PTH + p * 4 + 2), (unsigned short)addr);
@@ -221,7 +131,7 @@ static void build(const struct holder *h)
     move(R_BPLCON2, 0);
     move(R_DIWSTRT, 0x2C81);
     move(R_DIWSTOP, 0x2CC1);                    /* PAL: 256 lines */
-    move(R_COLOR00, h ? h->background : 0);
+    move(R_COLOR00, h ? ocs(h->background) : 0);
 
     for (i = 0; h && i < h->nbands; i++) {
         const struct display_band *b = &h->bands[i];
@@ -238,7 +148,10 @@ static void build(const struct holder *h)
             mode |= BPLCON0_HIRES;
             shown = 80;
         }
-        modulo = (unsigned short)(bi.bytes_per_row - shown);
+        /* After a row's fetch the pointer has moved on by what was shown;
+         * the modulo takes it the rest of the way to the same plane's next
+         * row - past the other planes, the rows being interleaved. */
+        modulo = (unsigned short)(bi.row_step - shown);
 
         /* Set the band up in the gap above it, where nothing is drawn. */
         wait_line(first - DISPLAY_BAND_GAP);
@@ -247,7 +160,7 @@ static void build(const struct holder *h)
         move(R_BPL1MOD, modulo);
         move(R_BPL2MOD, modulo);
         for (c = 1; c < b->ncolors; c++)        /* colour 0 is the background's */
-            move((unsigned short)(R_COLOR00 + c * 2), b->colors[c]);
+            move((unsigned short)(R_COLOR00 + c * 2), ocs(b->colors[c]));
         set_pointers(&bi, b->yoffset);
 
         wait_line(first);
@@ -318,17 +231,16 @@ static int acceptable(void *owner, const struct display_band *bands,
     for (i = 0; i < n; i++) {
         const struct display_band *b = &bands[i];
         struct bitmap_info bi;
-        int slot;
 
         if (b->height == 0 || b->y < next_free ||
             (unsigned long)b->y + b->height > DISPLAY_LINES || b->ncolors > 32)
             return 0;
         next_free = (unsigned long)b->y + b->height + DISPLAY_BAND_GAP;
 
-        slot = slot_of(b->bitmap);
-        if (slot < 0 || bitmaps[slot].owner != owner)
+        if (bitmap_info(b->bitmap, &bi) != 0 || bitmap_owner(b->bitmap) != owner)
             return 0;                           /* not yours to show */
-        bi = bitmaps[slot].info;
+        if (bi.format != BMFMT_PLANAR || !(bi.flags & BITMAP_DISPLAYABLE))
+            return 0;                           /* not where the chipset can see it */
 
         if (b->flags & BAND_HIRES) {
             if (bi.width < 640 || bi.depth > 4) /* OCS: 16 colours in hires */
@@ -343,7 +255,7 @@ static int acceptable(void *owner, const struct display_band *bands,
 }
 
 int display_set_program(void *owner, const struct display_band *bands,
-                        unsigned long nbands, unsigned long background)
+                        unsigned long nbands, colour_t background)
 {
     struct holder *h;
     unsigned long i;
@@ -355,7 +267,7 @@ int display_set_program(void *owner, const struct display_band *bands,
         for (i = 0; i < nbands; i++)
             h->bands[i] = bands[i];
         h->nbands = nbands;
-        h->background = (unsigned short)background;
+        h->background = background;
         if (h == &stack[depth - 1])
             rebuild();
         rc = 0;
@@ -427,20 +339,8 @@ void *display_owner(void)
 
 void display_owner_gone(void *owner)
 {
-    int i;
-
     display_release(owner);             /* -1 if it held nothing: fine */
-
-    for (i = 0; i < MAX_BITMAPS; i++) {
-        bitmap_t bm = 0;
-
-        CRITICAL_ENTER();
-        if (bitmaps[i].used && bitmaps[i].owner == owner)
-            bm = ((bitmap_t)bitmaps[i].generation << 8) | (unsigned long)(i + 1);
-        CRITICAL_EXIT();
-        if (bm)
-            bitmap_free(bm);
-    }
+    bitmap_free_owner(owner);
 }
 
 static void task_gone(struct task *t)
@@ -450,10 +350,7 @@ static void task_gone(struct task *t)
 
 void display_init(void)
 {
-    int i;
-
-    for (i = 0; i < MAX_BITMAPS; i++)
-        bitmaps[i].used = 0;
+    bitmap_init();
     depth = 0;
     swap_pending = 0;
     vblank_waiters.head = vblank_waiters.tail = 0;

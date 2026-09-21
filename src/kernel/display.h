@@ -14,23 +14,7 @@
 #ifndef DISPLAY_H
 #define DISPLAY_H
 
-/* ---------------------------------------------------------------- bitmaps --- */
-
-typedef unsigned long bitmap_t;         /* 0 is never a valid handle */
-
-#define BITMAP_MAX_DEPTH  6
-
-struct bitmap_info {
-    unsigned short width, height, depth;
-    unsigned short bytes_per_row;
-    unsigned char *planes[BITMAP_MAX_DEPTH];    /* chip RAM */
-};
-
-/* width a multiple of 16. NULL owner is the kernel. 0 if it cannot be had. */
-bitmap_t bitmap_alloc(unsigned long width, unsigned long height,
-                      unsigned long depth, void *owner);
-int      bitmap_free(bitmap_t bm);
-int      bitmap_info(bitmap_t bm, struct bitmap_info *out);
+#include "bitmap.h"
 
 /* ------------------------------------------------------ the display program --- */
 
@@ -45,6 +29,10 @@ int      bitmap_info(bitmap_t bm, struct bitmap_info *out);
  * about fifteen register writes before a line starts being drawn, a band
  * needs more than that to set up, and the only place to do it without it
  * showing is a line where nothing is displayed. The gap shows `background`.
+ *
+ * The bitmap must be BITMAP_DISPLAYABLE and the caller's own. Colours are
+ * system colours, 24-bit; what the chipset can show of them is this file's
+ * problem, not the caller's.
  *
  * yoffset is the bitmap row shown on the band's first line, and it wraps: a
  * band may be a window onto a circular bitmap, which is how text scrolls
@@ -63,7 +51,8 @@ struct display_band {
     unsigned short flags;
     unsigned short ncolors;             /* how many of colors[] to load */
     unsigned short reserved;
-    unsigned short colors[32];          /* $0RGB */
+    colour_t       colors[32];          /* 0x00RRGGBB; colors[0] is unused -
+                                         * colour 0 is the background's */
 };
 
 /* ------------------------------------------------------------- ownership --- */
@@ -103,7 +92,7 @@ void display_owner_gone(void *owner);
  * is on top, and is remembered for when it is again if not. -1, changing
  * nothing, if any band is unacceptable or owner is not on the stack. */
 int  display_set_program(void *owner, const struct display_band *bands,
-                         unsigned long nbands, unsigned long background);
+                         unsigned long nbands, colour_t background);
 
 /* Sleep until the next vertical blank. Task context only. */
 void display_wait_vblank(void);

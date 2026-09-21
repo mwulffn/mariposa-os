@@ -125,17 +125,17 @@ static void set_program(int yoffset)
     for (i = 0; i < 32; i++)
         band.colors[i] = 0;
     /* Workbench 1.3's four, because the font is from the same place. */
-    band.colors[1] = 0x0FFF;                /* normal: white */
-    band.colors[2] = 0x0002;                /* dim: black */
-    band.colors[3] = 0x0F80;                /* bright: orange */
-    display_set_program(OWNER, &band, 1, 0x005A);
+    band.colors[1] = 0xFFFFFF;              /* normal: white */
+    band.colors[2] = 0x000022;              /* dim: black */
+    band.colors[3] = 0xFF8800;              /* bright: orange */
+    display_set_program(OWNER, &band, 1, 0x0055AA);
 }
 
 /* dcon_draw.s. In assembly because it is the one loop here that matters:
  * the C version, even with every multiply taken out of it, cost about 2,700
  * cycles a cell - a second for a full screen. */
 void dcon_draw_cells(unsigned char *p0, unsigned char *p1, const char *chars,
-                     const unsigned char *colours, unsigned long bytes_per_row,
+                     const unsigned char *colours, unsigned long row_step,
                      long cursor_col);
 
 static void draw_row(int prow, const char *chars, const unsigned char *cols,
@@ -147,10 +147,10 @@ static void draw_row(int prow, const char *chars, const unsigned char *cols,
     /* Down to the row by adding: a 68000 multiplies 32-bit values by
      * calling a routine. */
     for (y = prow * GLYPH_H; y > 0; y--) {
-        p0 += bi.bytes_per_row;
-        p1 += bi.bytes_per_row;
+        p0 += bi.row_step;
+        p1 += bi.row_step;
     }
-    dcon_draw_cells(p0, p1, chars, cols, bi.bytes_per_row, cursor_col);
+    dcon_draw_cells(p0, p1, chars, cols, bi.row_step, cursor_col);
 }
 
 void dcon_render(void)
@@ -259,7 +259,7 @@ int dcon_init(void)
 {
     int r;
 
-    screen = bitmap_alloc(640, DCON_ROWS * GLYPH_H, 2, OWNER);
+    screen = bitmap_alloc(640, DCON_ROWS * GLYPH_H, 2, BITMAP_DISPLAYABLE, OWNER);
     if (!screen || bitmap_info(screen, &bi) != 0 ||
         display_acquire(OWNER, 0, 0) != 0) {
         screen = 0;

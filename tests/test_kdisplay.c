@@ -21,6 +21,8 @@
 #define R_BPL1PTH  0x0E0
 #define R_BPL2PTH  0x0E4
 #define R_BPLCON0  0x100
+#define R_BPL1MOD  0x108
+#define R_BPL2MOD  0x10A
 #define R_COLOR00  0x180
 
 #define FIRST_LINE 0x2C
@@ -85,7 +87,7 @@ static uint32_t copper_list(void)
     return ((uint32_t)h_custom(R_COP1LCH) << 16) | h_custom(R_COP1LCL);
 }
 
-typedef struct { uint16_t bplcon0, colors[4]; uint32_t bpl1, bpl2; } shown;
+typedef struct { uint16_t bplcon0, colors[4], mod1, mod2; uint32_t bpl1, bpl2; } shown;
 
 static shown at_line(int display_line)
 {
@@ -99,6 +101,8 @@ static shown at_line(int display_line)
         return s;
     }
     s.bplcon0 = regs[R_BPLCON0 >> 1];
+    s.mod1 = regs[R_BPL1MOD >> 1];
+    s.mod2 = regs[R_BPL2MOD >> 1];
     s.bpl1 = ((uint32_t)regs[R_BPL1PTH >> 1] << 16) | regs[(R_BPL1PTH + 2) >> 1];
     s.bpl2 = ((uint32_t)regs[R_BPL2PTH >> 1] << 16) | regs[(R_BPL2PTH + 2) >> 1];
     for (i = 0; i < 4; i++)
@@ -108,46 +112,70 @@ static shown at_line(int display_line)
 
 static int planes_on(const shown *s) { return (s->bplcon0 >> 12) & 7; }
 
-/* struct display_band, 80 bytes: y, height, bitmap, yoffset, flags,
- * ncolors, reserved, colors[32]. */
+/* A test writes colours the way the copper will show them, $0RGB, because
+ * that is what it then looks for. The kernel takes 24-bit. */
+static uint32_t rgb24(uint16_t ocs)
+{
+    return ((uint32_t)((ocs >> 8) & 15) * 0x11u << 16) |
+           ((uint32_t)((ocs >> 4) & 15) * 0x11u << 8) | ((uint32_t)(ocs & 15) * 0x11u);
+}
+
+/* struct display_band, 144 bytes: y, height, bitmap, yoffset, flags,
+ * ncolors, reserved, then colors[32] as longs from offset 16. */
+#define BAND_SIZE 144
 typedef struct { unsigned y, height; uint32_t bitmap; unsigned yoffset, flags; uint16_t c1; } band;
 
-static uint32_t program(uint32_t owner, const band *b, int n, uint32_t background)
+static uint32_t program24(uint32_t owner, const band *b, int n, uint32_t background24,
+                          uint32_t c1_24)
 {
-    uint8_t buf[80 * 9];
+    uint8_t buf[BAND_SIZE * 9];
     uint32_t a[4];
     int i;
 
     memset(buf, 0, sizeof buf);
     for (i = 0; i < n; i++) {
-        uint8_t *p = buf + 80 * i;
+        uint8_t *p = buf + BAND_SIZE * i;
         p[0] = (uint8_t)(b[i].y >> 8);       p[1] = (uint8_t)b[i].y;
         p[2] = (uint8_t)(b[i].height >> 8);  p[3] = (uint8_t)b[i].height;
         put32(p + 4, b[i].bitmap);
         p[8] = (uint8_t)(b[i].yoffset >> 8); p[9] = (uint8_t)b[i].yoffset;
         p[11] = (uint8_t)b[i].flags;
         p[13] = 4;                                          /* ncolors */
-        p[18] = (uint8_t)(b[i].c1 >> 8);     p[19] = (uint8_t)b[i].c1;   /* colors[1] */
+        put32(p + 20, c1_24 ? c1_24 : rgb24(b[i].c1));      /* colors[1] */
     }
-    a[0] = owner; a[1] = h_alloc(buf, 80u * (unsigned)(n ? n : 1)); a[2] = (uint32_t)n; a[3] = background;
+    a[0] = owner; a[1] = h_alloc(buf, (size_t)BAND_SIZE * (unsigned)(n ? n : 1));
+    a[2] = (uint32_t)n; a[3] = background24;
     return kcall("kernel:_display_set_program", 4, a);
+}
+
+static uint32_t program(uint32_t owner, const band *b, int n, uint32_t background)
+{
+    return program24(owner, b, n, rgb24((uint16_t)background), 0);
+}
+
+#define BITMAP_DISPLAYABLE 1u
+
+static uint32_t bm_alloc_flags(uint32_t w, uint32_t h, uint32_t d, uint32_t flags, uint32_t owner)
+{
+    uint32_t a[5]; a[0] = w; a[1] = h; a[2] = d; a[3] = flags; a[4] = owner;
+    return kcall("kernel:_bitmap_alloc", 5, a);
 }
 
 static uint32_t bm_alloc(uint32_t w, uint32_t h, uint32_t d, uint32_t owner)
 {
-    uint32_t a[4]; a[0] = w; a[1] = h; a[2] = d; a[3] = owner;
-    return kcall("kernel:_bitmap_alloc", 4, a);
+    return bm_alloc_flags(w, h, d, BITMAP_DISPLAYABLE, owner);
 }
 
-/* struct bitmap_info: width, height, depth, bytes_per_row, planes[6] */
+/* struct bitmap_info: the planes are six pointers from offset 16. See
+ * test_kbitmap.c, which pins the whole layout. */
 static uint32_t plane(uint32_t bm, int n)
 {
-    uint8_t zero[32] = {0};
+    uint8_t zero[40] = {0};
     uint32_t a[2];
 
     a[0] = bm; a[1] = h_alloc(zero, sizeof zero);
     CHECK_U32(0, kcall("kernel:_bitmap_info", 2, a));
-    return h_peek32(a[1] + 8 + 4u * (unsigned)n);
+    return h_peek32(a[1] + 16 + 4u * (unsigned)n);
 }
 
 static uint32_t acquire(uint32_t owner, uint32_t flags, const char *notify)
@@ -176,7 +204,7 @@ static void t_bitmaps_live_in_chip_ram(void)
     CHECK(bm != 0, "no bitmap");
     p0 = plane(bm, 0);  p1 = plane(bm, 1);
     CHECK(p0 >= CHIP_BASE && p0 < CHIP_BASE + CHIP_SIZE, "plane 0 at $%X is not chip RAM", p0);
-    CHECK_U32(80u * 256u, p1 - p0);
+    CHECK_U32(80, p1 - p0);                             /* interleaved by row */
     CHECK_U32(0, plane(bm, 2));
 
     CHECK_U32(0, kcall("kernel:_bitmap_free", 1, &bm));
@@ -265,6 +293,50 @@ static void t_two_bands_two_palettes(void)
     CHECK_U32(plane(b[1].bitmap, 0), s.bpl1);
 }
 
+/*
+ * Rows are interleaved, so after fetching a row the bitplane pointers have
+ * to skip the other planes to reach their own next row: that is the modulo.
+ * Get it wrong and every line after the first shows another plane's data.
+ */
+static void t_modulo_skips_the_other_planes(void)
+{
+    uint32_t me = new_owner();
+    band b[2] = { { 0, 100, 0, 0, BAND_HIRES, 0 }, { 110, 100, 0, 0, 0, 0 } };
+    shown s;
+
+    setup();
+    b[0].bitmap = bm_alloc(640, 100, 4, me);            /* 80 shown, step 320 */
+    b[1].bitmap = bm_alloc(640, 100, 3, me);            /* lores window on a wide bitmap */
+    acquire(me, 0, NULL);
+    CHECK_U32(0, program(me, b, 2, 0));
+    vblank();
+
+    s = at_line(50);
+    CHECK_U32(3 * 80, s.mod1);  CHECK_U32(3 * 80, s.mod2);
+    s = at_line(150);
+    CHECK_U32(3 * 80 - 40, s.mod1);                     /* 40 fetched of a 240 step */
+    CHECK_U32(plane(b[1].bitmap, 1), s.bpl2);
+    CHECK_U32(plane(b[1].bitmap, 0) + 80, s.bpl2);      /* next to plane 0, not after it */
+}
+
+/* Colours above the hardware are 24-bit. OCS gets the top four bits a gun. */
+static void t_colours_are_quantised_for_ocs(void)
+{
+    uint32_t me = new_owner();
+    band b = { 0, 100, 0, 0, BAND_HIRES, 0 };
+    shown s;
+
+    setup();
+    b.bitmap = bm_alloc(640, 100, 2, me);
+    acquire(me, 0, NULL);
+    CHECK_U32(0, program24(me, &b, 1, 0x00F8F8F8u, 0x00123456u));
+    vblank();
+
+    s = at_line(50);
+    CHECK_U32(0x0FFF, s.colors[0]);                     /* $F8 is $F, not $10 */
+    CHECK_U32(0x0135, s.colors[1]);
+}
+
 /* The copper's vertical counter is eight bits and PAL has more lines than
  * that. A band down here is reached through the $FFDF wait. */
 static void t_band_below_raster_line_255(void)
@@ -293,15 +365,16 @@ static void t_yoffset_wraps(void)
     shown s;
 
     setup();
-    bm = b.bitmap = bm_alloc(640, 256, 1, me);
+    bm = b.bitmap = bm_alloc(640, 256, 2, me);
     acquire(me, 0, NULL);
     CHECK_U32(0, program(me, &b, 1, 0));
     vblank();
 
     s = at_line(0);
-    CHECK_U32(plane(bm, 0) + 100u * 80u, s.bpl1);       /* row 100 on top */
+    CHECK_U32(plane(bm, 0) + 100u * 160u, s.bpl1);      /* row 100 on top: rows are
+                                                         * row_step apart, 2 x 80 */
     s = at_line(155);
-    CHECK_U32(plane(bm, 0) + 100u * 80u, s.bpl1);       /* not reloaded yet */
+    CHECK_U32(plane(bm, 0) + 100u * 160u, s.bpl1);      /* not reloaded yet */
     s = at_line(156);
     CHECK_U32(plane(bm, 0), s.bpl1);                    /* row 0 follows row 255 */
 }
@@ -331,6 +404,8 @@ static void t_bad_programs_are_refused(void)
                                                         REFUSED("a handle that was never issued");
     b[0] = good; b[1] = good; b[1].y = 120; b[1].bitmap = lores;
                                                         REFUSED("a 320 wide bitmap in hires");
+    b[0] = good; b[1] = good; b[1].y = 120; b[1].bitmap = bm_alloc_flags(640, 100, 2, 0, me);
+                                                        REFUSED("a bitmap that is not in chip RAM");
     b[0] = good; b[1] = good; b[1].y = 120; b[1].yoffset = 100;
                                                         REFUSED("a yoffset past the bitmap");
     CHECK(program(them, &good, 1, 0) != 0, "a program from someone not on the stack");
@@ -470,12 +545,13 @@ static int glyph_at(int row, int col, unsigned ch)
     uint32_t font = h_sym("kernel:_font8x8") + ch * 8u;
     shown top = at_line(0);
     uint32_t rows_in_bitmap = 32, base = console_plane0;
-    uint32_t first_row = (top.bpl1 - base) / (80u * 8u);
+    const uint32_t step = 160;                          /* 2 planes of 80 bytes */
+    uint32_t first_row = (top.bpl1 - base) / (step * 8u);
     uint32_t prow = (first_row + (uint32_t)row) % rows_in_bitmap;
     int y;
 
     for (y = 0; y < 8; y++)
-        if (h_peek8(base + (prow * 8u + (uint32_t)y) * 80u + (uint32_t)col) != h_peek8(font + (uint32_t)y))
+        if (h_peek8(base + (prow * 8u + (uint32_t)y) * step + (uint32_t)col) != h_peek8(font + (uint32_t)y))
             return 0;
     return 1;
 }
@@ -738,6 +814,8 @@ static const test_case tests[] = {
     { "stale_handle",           t_stale_handle_stays_dead,          NULL },
     { "one_band",               t_one_band,                         NULL },
     { "two_bands",              t_two_bands_two_palettes,           NULL },
+    { "modulo_skips_planes",    t_modulo_skips_the_other_planes,    NULL },
+    { "colours_quantised",      t_colours_are_quantised_for_ocs,    NULL },
     { "band_below_line_255",    t_band_below_raster_line_255,       NULL },
     { "yoffset_wraps",          t_yoffset_wraps,                    NULL },
     { "bad_programs_refused",   t_bad_programs_are_refused,         NULL },

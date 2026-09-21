@@ -3,10 +3,12 @@
 ; ============================================================
 ; void dcon_draw_cells(unsigned char *p0, unsigned char *p1,
 ;                      const char *chars, const unsigned char *colours,
-;                      unsigned long bytes_per_row, long cursor_col);
+;                      unsigned long row_step, long cursor_col);
 ;
 ; Draw one row of DCON_COLS text cells into two bitplanes. p0 and p1 point
-; at the top left byte of the row in each plane. colours[] is one byte a
+; at the top left byte of the row in each plane, and row_step is how far
+; apart consecutive pixel rows of one plane are - NOT bytes per row: rows
+; are interleaved (docs/bitmap_design.md). colours[] is one byte a
 ; cell: bit 0 says the glyph goes in plane 0, bit 1 in plane 1. cursor_col
 ; is drawn as a solid block in both planes; -1 for no cursor.
 ;
@@ -41,7 +43,7 @@ _dcon_draw_cells:
         move.l  48(sp),a4               ; plane 1
         move.l  52(sp),a0               ; characters
         move.l  56(sp),a1               ; colours
-        move.l  60(sp),d5               ; bytes per row
+        move.l  60(sp),d5               ; row step
         move.l  64(sp),d6               ; cells until the cursor; never 0 if -1
         lea     _font8x8,a2
         move.w  #DCON_COLS-1,-(sp)      ; cell counter: every register is busy

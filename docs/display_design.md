@@ -35,11 +35,11 @@ Wasm host call without being rewritten.
 
 ## Bitmaps
 
-`bitmap_alloc(width, height, depth, owner)` returns a handle to chip RAM,
-tagged with its owner like any allocation. A handle carries a generation, so
-one that has been freed does not come back to life when its slot is reused
-for somebody else's bitmap. `bitmap_info` gives a native caller the plane
-addresses to draw into; a Wasm caller will never see them.
+The system bitmap standard is its own document, `docs/bitmap_design.md`:
+planar with interleaved rows, two strides, a format field, 24-bit colour,
+half-open rectangles. The display shows bitmaps that are
+`BITMAP_DISPLAYABLE` - in chip RAM - and belong to the caller; it takes
+24-bit colours and quantises them to what the chipset has.
 
 ## The display program
 
@@ -56,7 +56,9 @@ window manager that wants columns puts them in one bitmap.
 
 - **Bands need a gap.** The copper manages about fifteen register writes
   before a line starts being drawn, and a band needs more than that: mode,
-  fetch window, modulos, palette, a pointer pair per plane. The only place
+  fetch window, modulos, palette, a pointer pair per plane. (The modulo is
+  `row_step - bytes fetched`: rows are interleaved, so each plane's pointer
+  has to skip the others to reach its own next row.) The only place
   to do it without it showing is a line where nothing is displayed, so bands
   are separated by `DISPLAY_BAND_GAP` lines of background colour. It is also
   where a border would go.
