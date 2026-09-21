@@ -79,6 +79,10 @@ static void select_lba(const struct ata_if *ifc, unsigned long lba,
     *ifc->reg(ATA_REG_NSECTOR) = (unsigned char)count;
 }
 
+/* ata_pio.s */
+void ata_pio_read(volatile unsigned short *port, void *buf, unsigned long words);
+void ata_pio_write(volatile unsigned short *port, const void *buf, unsigned long words);
+
 int ata_read_sectors(const struct ata_if *ifc, unsigned long lba,
                      unsigned count, void *buf)
 {
@@ -95,16 +99,17 @@ int ata_read_sectors(const struct ata_if *ifc, unsigned long lba,
     *ifc->reg(ATA_REG_COMMAND) = ATA_CMD_READ;
 
     for (sector = 0; sector < count; sector++) {
-        int word;
-
         if (wait_drq(ifc) != 0)
             return -1;
 
         /* A word read of the data port, so the two bytes land in disk order.
          * That is what lets a big-endian RDB magic compare and a
          * little-endian FAT field both come out of the same buffer. */
-        for (word = 0; word < SECTOR_WORDS; word++)
-            *out++ = *ifc->data;
+        /* A word read of the data port, so the two bytes land in disk order.
+         * The loop is assembly - ata_pio.s - because every byte on the disk
+         * goes through it. */
+        ata_pio_read(ifc->data, out, SECTOR_WORDS);
+        out += SECTOR_WORDS;
     }
 
     if (wait_not_busy(ifc) != 0)
@@ -132,15 +137,13 @@ int ata_write_sectors(const struct ata_if *ifc, unsigned long lba,
     *ifc->reg(ATA_REG_COMMAND) = ATA_CMD_WRITE;
 
     for (sector = 0; sector < count; sector++) {
-        int word;
-
         /* The drive asks for each sector in turn. Word writes, for the same
          * reason the read path uses word reads: bytes reach the disk in the
          * order they sit in memory. */
         if (wait_drq(ifc) != 0)
             return -1;
-        for (word = 0; word < SECTOR_WORDS; word++)
-            *ifc->data = *in++;
+        ata_pio_write(ifc->data, in, SECTOR_WORDS);
+        in += SECTOR_WORDS;
     }
 
     if (wait_not_busy(ifc) != 0)
@@ -160,9 +163,7 @@ int ata_flush(const struct ata_if *ifc)
 
 unsigned long ata_capacity(const struct ata_if *ifc, void *buf512)
 {
-    unsigned short *out = (unsigned short *)buf512;
     const unsigned char *id = (const unsigned char *)buf512;
-    int word;
 
     if (wait_not_busy(ifc) != 0)
         return 0;
@@ -170,8 +171,7 @@ unsigned long ata_capacity(const struct ata_if *ifc, void *buf512)
     *ifc->reg(ATA_REG_COMMAND) = ATA_CMD_IDENTIFY;
     if (wait_drq(ifc) != 0)
         return 0;
-    for (word = 0; word < SECTOR_WORDS; word++)
-        *out++ = *ifc->data;
+    ata_pio_read(ifc->data, buf512, SECTOR_WORDS);
 
     /* IDENTIFY words are little-endian and the buffer holds them in wire
      * order, so they are picked apart by byte. Word 49 bit 9: LBA. Words

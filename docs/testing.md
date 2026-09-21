@@ -212,6 +212,42 @@ on top of the kernel's own variables, and every test passed anyway, until a
 deliberately broken build shifted the layout enough for one to crash with an
 address error that had nothing to do with the breakage.
 
+### Where the cycles went
+
+```bash
+H_PROFILE=/tmp/prof.txt tests/build/run-tests --filter kext2.w_throughput
+tools/profile.py /tmp/prof.txt
+```
+
+With `H_PROFILE` set the harness charges every 68000 cycle to the 16-byte bin
+its PC falls in and dumps the bins at exit; `tools/profile.py` adds them up
+against the kernel's linker map, by object file (exact) and by global symbol
+(approximate: statics are charged to the global before them). It exists
+because guessing was wrong: the ext2 write path was ten times slower than
+the disk, the filesystem logic being tuned was 11% of it, and the PIO loop
+and a block copy were 78%.
+
+### Host tools as judges
+
+`kext2.w_*` do not check their own work: the partition is dumped with
+`h_disk_save()` and given to the real `e2fsck` and `debugfs`. That needs
+**e2fsprogs** (`brew install e2fsprogs`, `apt install e2fsprogs`; it is in
+`docker/Dockerfile` and both install scripts). `tests/mkdisk.py` finds the
+tools on `PATH` or in Homebrew's keg-only directory and stops with
+instructions if it cannot.
+
+**Noted, not done: boot the kernel for tests that do not care how it was set
+up.** Every kernel test file repeats a dozen lines that build a memory map by
+hand, call `mem_init`, `ser_init`, `sched_init`, `irq_init` and so on in the
+right order, and place a heap. `boot.*` already shows the alternative: run
+the ROM's real memory detection, build the real map and enter the kernel at
+`_start`. A helper that did that once would hand a test a fully initialised
+machine - real heap, interrupts, devices - and no test would place anything
+by hand, which removes the class of bug above instead of one instance of it.
+The allocator's own tests keep their synthetic maps: a 4KB pool, two regions
+and no memory at all are things only a hand-built map can say. Everything
+above them - tasks, display, storage, console - could move.
+
 **Test data must not repeat on a cluster boundary.** The generated files'
 byte patterns once had a period of 256, which made every 512-byte cluster
 identical: a loader that read a scattered chain in the wrong order would

@@ -19,19 +19,19 @@ MAP     = $(BUILD)/kernel.map
 SYM     = $(BUILD)/kernel.sym
 
 # Sources
-ASRC    = crt0.s libsup.s cpu.s isr.s vectors.s switch.s dcon_draw.s
+ASRC    = crt0.s libsup.s cpu.s isr.s vectors.s switch.s dcon_draw.s blkcopy.s
 CSRC    = kernel.c mem.c serial.c kprintf.c irq.c vector.c task.c dev.c console.c kstring.c \
           cia.c kbd.c input.c keymap.c \
           display.c bitmap.c dcon.c font8x8.c \
-          blk.c ide.c bcache.c vfs.c fs_fat16.c
+          blk.c ide.c bcache.c vfs.c fs_fat16.c fs_ext2.c
 
 # Shared with the ROM: hardware definitions and the UART register
 # primitives. The waiting strategy is not shared - see serial_hw.h.
 SHARED_SRC = ../shared/serial_hw.c ../shared/ata.c ../shared/rdb.c \
-             ../shared/fat16.c
+             ../shared/fat16.c ../shared/ext2.c
 
 # Objects
-AOBJ    = $(ASRC:%.s=$(BUILD)/%.o)
+AOBJ    = $(ASRC:%.s=$(BUILD)/%.o) $(BUILD)/ata_pio.o
 COBJ    = $(CSRC:%.c=$(BUILD)/%.o)
 SOBJ    = $(addprefix $(BUILD)/,$(notdir $(SHARED_SRC:.c=.o)))
 CASM    = $(CSRC:%.c=$(BUILD)/%.asm)
@@ -52,6 +52,9 @@ $(SYM): $(TARGET)
 	@python3 ../../tests/mksym.py $(MAP) $(SYM)
 
 $(BUILD)/%.o: %.s | $(BUILD)
+	$(VASM) $(VASMFLAGS) -o $@ $<
+
+$(BUILD)/ata_pio.o: ../shared/ata_pio.s | $(BUILD)
 	$(VASM) $(VASMFLAGS) -o $@ $<
 
 # No per-file dependency tracking: vbcc has no -MD. Every C object depends

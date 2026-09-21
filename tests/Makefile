@@ -28,7 +28,7 @@ TARGET = $(BUILD)/run-tests
 CC ?= cc
 
 # Our code is linted hard. Musashi is third party and is not.
-CFLAGS_TEST    = -std=c99 -O1 -g -Wall -Wextra -I. -I$(BUILD) -I$(MUSASHI_DIR)
+CFLAGS_TEST    = -D_POSIX_C_SOURCE=200809L -std=c99 -O1 -g -Wall -Wextra -I. -I$(BUILD) -I$(MUSASHI_DIR)
 # M68K_EMULATE_INT_ACK: without it Musashi clears the IRQ line the moment it
 # services an interrupt, which makes the line edge-triggered. The Amiga's is
 # level-triggered - an interrupt stays asserted until the handler clears its
@@ -42,7 +42,8 @@ TEST_SRC = main.c protocol.c harness.c test_format.c test_memory.c test_zorro.c 
            test_vectors.c test_irq.c test_disk.c test_libsup.c test_cpu.c \
            test_kserial.c test_boot.c test_kmem.c test_task.c \
            test_kirq.c test_kinput.c test_kdisplay.c \
-           test_kbitmap.c test_kblk.c test_kvfs.c
+           test_kbitmap.c test_kblk.c test_kvfs.c \
+           test_kext2.c
 TEST_OBJ = $(TEST_SRC:%.c=$(BUILD)/%.o)
 
 MUSASHI_OBJ = $(BUILD)/m68kcpu.o $(BUILD)/m68kdasm.o $(BUILD)/m68kops.o \
@@ -72,7 +73,7 @@ DISK_STAMP = $(BUILD)/disk_layout.h
 $(DISK_STAMP): mkdisk.py | $(BUILD)
 	@python3 mkdisk.py $(BUILD)
 
-$(BUILD)/test_disk.o $(BUILD)/test_kblk.o $(BUILD)/test_kvfs.o: $(DISK_STAMP)
+$(BUILD)/test_disk.o $(BUILD)/test_kblk.o $(BUILD)/test_kvfs.o $(BUILD)/test_kext2.o: $(DISK_STAMP)
 
 # Assembled at origin zero - the harness loads each one elsewhere and
 # biases its symbols to match.

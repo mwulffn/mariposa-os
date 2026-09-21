@@ -449,6 +449,64 @@ static void t_boot_path_end_to_end(void)
               h_peek8(h_sym("KERNEL_LOAD_ADDR") + DISK_SYSBIN_SIZE - 1));
 }
 
+/*
+ * The boot partition may be ext2. Same chain as above, different image: the
+ * ROM tries ext2 first - its magic number is a far better test than FAT's -
+ * and finds "system.bin" in lower case, which ext2 will not fold for it.
+ * 20000 bytes at 1KB a block is twelve direct blocks and eight through an
+ * indirect one.
+ */
+static void t_boot_from_ext2(void)
+{
+    h_result r;
+    uint32_t i, lba, size, bad = 0;
+
+    if (attach(DISK_EXT2_BOOT_IMAGE)) return;
+
+    h_begin_call();
+    r = h_call(h_sym("find_rdb"));
+    CHECK_CALL(r);
+    h_begin_call();
+    r = h_call(h_sym("load_partition"));
+    CHECK_CALL(r);
+    CHECK_U32(0u, h_get_d(0));
+    lba = h_get_d(1);  size = h_get_d(2);
+
+    h_begin_call();
+    h_set_d(1, lba);
+    h_set_d(2, size);
+    h_set_cycle_budget(200000000);
+    r = h_call(h_sym("load_system_bin"));
+    CHECK_CALL(r);
+    CHECK_U32(0u, h_get_d(0));
+    CHECK_U32(DISK_EXT2_BOOT_SIZE, h_get_d(1));
+    CHECK_CONTAINS("EXT2: Found SYSTEM.BIN", h_serial());
+
+    for (i = 0; i < DISK_EXT2_BOOT_SIZE; i++)
+        if (h_peek8(h_sym("KERNEL_LOAD_ADDR") + i) != DISK_SYSBIN_BYTE(i)) bad++;
+    CHECK(bad == 0, "%u of %u bytes wrong", bad, DISK_EXT2_BOOT_SIZE);
+}
+
+/* And a FAT16 boot partition is not mistaken for anything else: no ext2
+ * error is printed about a filesystem nobody said was there. */
+static void t_fat16_boot_says_nothing_of_ext2(void)
+{
+    h_result r;
+
+    if (attach(DISK_IMAGE)) return;
+    h_begin_call();  r = h_call(h_sym("find_rdb"));        CHECK_CALL(r);
+    h_begin_call();  r = h_call(h_sym("load_partition"));  CHECK_CALL(r);
+    {
+        uint32_t lba = h_get_d(1), size = h_get_d(2);
+        h_begin_call();
+        h_set_d(1, lba);  h_set_d(2, size);
+        r = h_call(h_sym("load_system_bin"));
+        CHECK_CALL(r);
+        CHECK_U32(0u, h_get_d(0));
+    }
+    CHECK(strstr(h_serial(), "EXT2") == NULL, "ext2 chatter on a FAT16 boot: %s", h_serial());
+}
+
 /* ------------------------------------------------------------------------ */
 
 static const test_case tests[] = {
@@ -476,6 +534,8 @@ static const test_case tests[] = {
 
     { "load_system_bin",       t_load_system_bin,       NULL },
     { "boot_path_end_to_end",  t_boot_path_end_to_end,  NULL },
+    { "boot_from_ext2",        t_boot_from_ext2,        NULL },
+    { "fat16_boot_no_ext2_noise", t_fat16_boot_says_nothing_of_ext2, NULL },
 };
 
 const test_suite disk_suite = { "disk", tests, sizeof tests / sizeof tests[0] };

@@ -237,11 +237,126 @@ def build_main_image():
 # rest are. The second partition holds no filesystem; every block of it is
 # its own number repeated, so a read that lands in the wrong place says
 # where it landed.
+#
+# The third is ext2, made by the real mke2fs from a directory tree built
+# here - so what the driver is tested against is what Linux makes, not what
+# this script thinks ext2 looks like.
 P2_LOWCYL = HIGHCYL + 1
 P2_HIGHCYL = P2_LOWCYL + 7
 P2_START = P2_LOWCYL * HEADS * SECTORS
 P2_SIZE = (P2_HIGHCYL - P2_LOWCYL + 1) * HEADS * SECTORS
-TWO_TOTAL_CYL = P2_HIGHCYL + 1
+P3_LOWCYL = P2_HIGHCYL + 1
+P3_HIGHCYL = P3_LOWCYL + 63  # 64 cylinders: 8192 blocks, 4MB
+P3_START = P3_LOWCYL * HEADS * SECTORS
+P3_SIZE = (P3_HIGHCYL - P3_LOWCYL + 1) * HEADS * SECTORS
+TWO_TOTAL_CYL = P3_HIGHCYL + 1
+
+EXT2_BOOT_KERNEL_SIZE = 20000  # 20 blocks: 12 direct and 8 through an indirect block
+EXT2_BIG_SIZE = 300 * 1024 + 123  # past the direct and single-indirect blocks
+# Enough for several directory blocks - and, at 256 inodes a group, enough to
+# push inodes into the second block group. With fewer, every inode on the
+# volume was in group 0 and a driver that ignored the group descriptors
+# passed every test.
+EXT2_MANY_FILES = 300
+EXT2_LONG_NAME = "a-rather-long-file-name-" + "x" * 96 + ".txt"  # 124 characters
+
+
+def ext2_byte(i):
+    # No period that divides a block: see data_byte.
+    return (i * 17 + 3 + (i >> 8) * 5 + (i >> 16) * 29) & 0xFF
+
+
+def find_tool(name):
+    """e2fsprogs is keg-only under Homebrew and lives in sbin elsewhere, so it
+    is often installed and not on PATH."""
+    dirs = os.environ.get("PATH", "").split(os.pathsep) + [
+        "/opt/homebrew/opt/e2fsprogs/sbin",
+        "/usr/local/opt/e2fsprogs/sbin",
+        "/sbin",
+        "/usr/sbin",
+        "/usr/local/sbin",
+    ]
+    for d in dirs:
+        path = os.path.join(d, name)
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    raise AssertionError(
+        "%s not found. The ext2 tests are built with the real e2fsprogs:\n"
+        "         macOS:  brew install e2fsprogs\n"
+        "         Debian: apt install e2fsprogs" % name
+    )
+
+
+def build_ext2_partition(boot=False):
+    import shutil
+    import subprocess
+    import tempfile
+
+    mke2fs = find_tool("mke2fs")
+    work = tempfile.mkdtemp(prefix="mkdisk-ext2-")
+    try:
+        root = os.path.join(work, "root")
+        os.makedirs(os.path.join(root, "docs", "deep"))
+        os.makedirs(os.path.join(root, "many"))
+        os.makedirs(os.path.join(root, "case"))
+
+        def put(rel, data):
+            with open(os.path.join(root, rel), "wb") as f:
+                f.write(data)
+
+        if boot:
+            # What the ROM looks for, in lower case on purpose: it asks for
+            # SYSTEM.BIN and ext2 will not fold the case for it. Big enough
+            # to need an indirect block.
+            put("system.bin", bytes(sysbin_byte(i) for i in range(EXT2_BOOT_KERNEL_SIZE)))
+        put("hello.txt", b"hello from ext2\n")
+        put("docs/notes.txt", NOTES_TEXT)
+        put("docs/deep/big.dat", bytes(ext2_byte(i) for i in range(EXT2_BIG_SIZE)))
+        put("empty", b"")
+        put(EXT2_LONG_NAME, b"long\n")
+        for i in range(EXT2_MANY_FILES):
+            put("many/file%03d.txt" % i, b"%d\n" % i)
+        # Two names that differ only by case: legal here, and something a
+        # case-insensitive lookup has to have a rule for.
+        put("case/Readme", b"mixed\n")
+        with open(os.path.join(work, "upper"), "wb") as f:
+            f.write(b"upper\n")  # added below: the host may fold case
+        os.symlink("hello.txt", os.path.join(root, "link"))
+
+        img = os.path.join(work, "ext2.img")
+        # Revision 1, 1KB blocks, 128-byte inodes, and none of the optional
+        # structure a driver would have to maintain: no htree directories, no
+        # reserved GDT blocks. filetype and sparse_super stay - every ext2
+        # made this century has them.
+        cmd = [
+            mke2fs, "-q", "-F", "-t", "ext2", "-r", "1", "-b", "1024", "-I", "128",
+            "-O", "^dir_index,^resize_inode,^ext_attr", "-m", "0", "-L", "sys",
+            "-g", "1024",  # four block groups, so the descriptors get used
+            "-E", "root_owner=0:0", "-d", root, img, str(P3_SIZE // 2) + "k",
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            raise AssertionError("mke2fs failed: %s" % (r.stderr.strip() or r.stdout.strip()))
+        # macOS folds case, so a staging directory cannot hold both names.
+        # debugfs writes straight into the image and does not care.
+        r = subprocess.run(
+            [find_tool("debugfs"), "-w", "-R",
+             "write %s /case/README" % os.path.join(work, "upper"), img],
+            capture_output=True, text=True,
+        )
+        if r.returncode != 0 or "rror" in r.stderr.replace("debugfs 1", ""):
+            raise AssertionError("debugfs failed: %s" % r.stderr.strip())
+        r = subprocess.run([find_tool("e2fsck"), "-fn", img], capture_output=True, text=True)
+        if r.returncode != 0:
+            raise AssertionError("the ext2 image does not pass e2fsck:\n%s" % r.stdout)
+        with open(img, "rb") as f:
+            data = f.read()
+        if len(data) != P3_SIZE * SECTOR:
+            raise AssertionError("mke2fs made %d bytes, wanted %d" % (len(data), P3_SIZE * SECTOR))
+        return data
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
 
 DOCS_CLUSTER = 100
 NOTES_CLUSTER = 101
@@ -320,13 +435,30 @@ def build_two_partition_image():
     img[0:SECTOR] = rdb_block(partlist=3, total_cyl=TWO_TOTAL_CYL)
     img[3 * SECTOR : 4 * SECTOR] = part_block(LOWCYL, HIGHCYL, b"DH0", next_block=5)
     img[5 * SECTOR : 6 * SECTOR] = part_block(
-        P2_LOWCYL, P2_HIGHCYL, b"DH1", dostype=0x52415721  # 'RAW!'
+        P2_LOWCYL, P2_HIGHCYL, b"DH1", next_block=9, dostype=0x52415721  # 'RAW!'
     )
+    img[9 * SECTOR : 10 * SECTOR] = part_block(
+        P3_LOWCYL, P3_HIGHCYL, b"DH2", dostype=0x45585432  # 'EXT2'
+    )
+    ext2 = build_ext2_partition()
+    img[P3_START * SECTOR : P3_START * SECTOR + len(ext2)] = ext2
     part = build_rich_partition()
     img[PART_START * SECTOR : PART_START * SECTOR + len(part)] = part
     for blk in range(P2_SIZE):
         off = (P2_START + blk) * SECTOR
         img[off : off + SECTOR] = struct.pack(">I", blk) * (SECTOR // 4)
+    return bytes(img)
+
+
+def build_ext2_boot_image():
+    """One partition, ext2, holding the kernel: what the ROM boots from when
+    the boot partition is not FAT16. The PART block is at LBA 1, where the
+    ROM's boot path looks."""
+    img = bytearray(TWO_TOTAL_CYL * HEADS * SECTORS * SECTOR)
+    img[0:SECTOR] = rdb_block(total_cyl=TWO_TOTAL_CYL)
+    img[SECTOR : 2 * SECTOR] = part_block(P3_LOWCYL, P3_HIGHCYL, b"DH0", dostype=0x45585432)
+    ext2 = build_ext2_partition(boot=True)
+    img[P3_START * SECTOR : P3_START * SECTOR + len(ext2)] = ext2
     return bytes(img)
 
 
@@ -473,6 +605,16 @@ HEADER = """\
 #define DISK2_DATA_SIZE         %(data_size)uu
 #define DISK2_DATA_BYTE(i)      ((uint8_t)(((i) * 13u + 5u + ((i) >> 8) * 7u) & 0xFFu))
 #define DISK2_NOTES_TEXT        "notes, in a subdirectory\\n"
+#define DISK2_P3_START          %(p3_start)uu
+#define DISK2_P3_SIZE           %(p3_size)uu
+#define DISK2_EXT2_BIG_SIZE     %(ext2_big)uu
+#define DISK2_EXT2_BYTE(i)      ((uint8_t)(((i) * 17u + 3u + ((i) >> 8) * 5u + ((i) >> 16) * 29u) & 0xFFu))
+#define DISK_E2FSCK             "%(e2fsck)s"
+#define DISK_DEBUGFS            "%(debugfs)s"
+#define DISK_EXT2_BOOT_IMAGE    "ext2-boot.img"
+#define DISK_EXT2_BOOT_SIZE     %(ext2_boot)uu
+#define DISK2_EXT2_MANY         %(ext2_many)uu
+#define DISK2_EXT2_LONG_NAME    "%(ext2_long)s"
 
 #endif /* DISK_LAYOUT_H */
 """
@@ -494,8 +636,19 @@ def main(argv):
 
     with open(os.path.join(out, "test-disk.img"), "wb") as f:
         f.write(img)
+    try:
+        two = build_two_partition_image()
+    except AssertionError as e:
+        sys.stderr.write("mkdisk: %s\n" % e)
+        return 2
     with open(os.path.join(out, "two-part.img"), "wb") as f:
-        f.write(build_two_partition_image())
+        f.write(two)
+    try:
+        with open(os.path.join(out, "ext2-boot.img"), "wb") as f:
+            f.write(build_ext2_boot_image())
+    except AssertionError as e:
+        sys.stderr.write("mkdisk: %s\n" % e)
+        return 2
     with open(os.path.join(out, "blank.img"), "wb") as f:
         f.write(build_blank_image())
     with open(os.path.join(out, "bigcyl.img"), "wb") as f:
@@ -532,6 +685,14 @@ def main(argv):
                 "p2_start": P2_START,
                 "p2_size": P2_SIZE,
                 "data_size": DATA_SIZE,
+                "p3_start": P3_START,
+                "p3_size": P3_SIZE,
+                "ext2_big": EXT2_BIG_SIZE,
+                "ext2_many": EXT2_MANY_FILES,
+                "ext2_boot": EXT2_BOOT_KERNEL_SIZE,
+                "e2fsck": find_tool("e2fsck"),
+                "debugfs": find_tool("debugfs"),
+                "ext2_long": EXT2_LONG_NAME,
             }
         )
 

@@ -12,6 +12,7 @@
 #include "blkdev.h"
 #include "rdb.h"
 #include "fat16.h"
+#include "ext2.h"
 #include "rom.h"
 
 #define RDB_BUFFER      ((void *)0x020000UL)
@@ -207,12 +208,116 @@ unsigned long rom_fat16_next_cluster(unsigned long cluster)
 
 /* ---------------------------------------------------------- boot path --- */
 
+/* ---------------------------------------------------------------- ext2 --- */
+
+/* Scratch for ext2, in the boot-time buffer area above the FAT16 ones. The
+ * ROM has no writable statics - it lives in ROM - so everything that is not
+ * on the stack has an address. Three 4KB blocks is the most ext2.c asks. */
+#define EXT2_VARS    ((struct ext2 *)0x023200UL)
+#define EXT2_DIRENT  ((struct ext2_dirent *)0x023400UL)
+#define EXT2_WORK    ((void *)0x024000UL)
+#define EXT2_WORK_BYTES (3UL * EXT2_MAX_BLOCK)
+
+/* ext2.c reads a device whose block 0 is the filesystem's. The ROM's device
+ * is the whole disk, so it is handed a window onto it - built on the stack,
+ * for the reason above. */
+struct window {
+    const struct blkdev *disk;
+    unsigned long        start;
+};
+
+static int window_read(const struct blkdev *dev, unsigned long lba,
+                       unsigned count, void *buf)
+{
+    const struct window *w = (const struct window *)dev->hw;
+
+    return w->disk->read(w->disk, w->start + lba, count, buf);
+}
+
+/*
+ * Load SYSTEM.BIN from an ext2 partition. Returns 0 and the size, -1 on
+ * error, and 1 if there is no ext2 here at all - so that the caller can go
+ * on to try FAT16 without an error having been printed about a filesystem
+ * nobody said was there.
+ */
+static long ext2_load_system_bin(unsigned long partition_lba, unsigned long *file_size)
+{
+    struct ext2 *fs = EXT2_VARS;
+    struct ext2_inode root, file;
+    struct window win;
+    struct blkdev dev;
+    unsigned long ino;
+    int rc;
+
+    win.disk  = blkdev_boot();
+    win.start = partition_lba;
+    dev.name    = "boot";
+    dev.read    = window_read;
+    dev.present = 0;
+    dev.hw      = &win;
+    dev.write   = 0;
+    dev.blocks  = 0;
+
+    rc = ext2_mount(&dev, fs, EXT2_WORK, EXT2_WORK_BYTES);
+    if (rc == EXT2_NOT_EXT2)
+        return 1;
+    if (rc == EXT2_UNSUPPORTED) {
+        say("EXT2: ERROR - this filesystem uses features the ROM cannot read\r\n");
+        say("EXT2:         (extents or a journal? make it with mke2fs -t ext2)\r\n");
+        return -1;
+    }
+    if (rc != EXT2_OK) {
+        say("EXT2: ERROR - cannot read the superblock\r\n");
+        return -1;
+    }
+    say2("EXT2: Block size %x.l, %x.l block groups\r\n", fs->block_size, fs->groups);
+
+    /* SYSTEM.BIN, however its case was typed: ext2 will not fold it for us. */
+    rc = ext2_read_inode(fs, EXT2_ROOT_INO, &root);
+    if (rc == EXT2_OK)
+        rc = ext2_lookup(fs, &root, "SYSTEM.BIN", 1, EXT2_DIRENT, &ino);
+    if (rc == EXT2_NOT_FOUND) {
+        say("EXT2: ERROR - SYSTEM.BIN not found in the root directory\r\n");
+        return -1;
+    }
+    if (rc == EXT2_OK)
+        rc = ext2_read_inode(fs, ino, &file);
+    if (rc != EXT2_OK) {
+        say("EXT2: ERROR - cannot read the directory\r\n");
+        return -1;
+    }
+    if ((file.mode & EXT2_S_IFMT) != EXT2_S_IFREG) {
+        say("EXT2: ERROR - SYSTEM.BIN is not a file\r\n");
+        return -1;
+    }
+    say2("EXT2: Found SYSTEM.BIN, inode %x.l, %x.l bytes\r\n", ino, file.size);
+    if (file.size > KERNEL_MAX_BYTES) {
+        say("EXT2: ERROR - File too large (>512KB)\r\n");
+        return -1;
+    }
+
+    if (ext2_read(fs, &file, 0, KERNEL_LOAD_ADDR, file.size) != (long)file.size) {
+        say("EXT2: ERROR - read failed\r\n");
+        return -1;
+    }
+    say1("EXT2: Loaded %x.l bytes\r\n", file.size);
+    *file_size = file.size;
+    return 0;
+}
+
 unsigned long rom_load_system_bin(unsigned long partition_lba,
                                   unsigned long *file_size)
 {
     static const char name[FAT16_NAME_LEN + 1] = "SYSTEM  BIN";
     unsigned long cluster, size, remaining;
     unsigned char *dst = (unsigned char *)KERNEL_LOAD_ADDR;
+    long ext2;
+
+    /* ext2 first: its magic number is a far better test than FAT's, which
+     * is two bytes that any PC-formatted anything ends with. */
+    ext2 = ext2_load_system_bin(partition_lba, file_size);
+    if (ext2 <= 0)
+        return ext2 == 0 ? 0 : (unsigned long)-1;
 
     say("FAT16: LoadSystemBin called\r\n");
 

@@ -12,7 +12,7 @@
 
 #define VFS_MAX_MOUNTS   8
 #define VFS_MAX_HANDLES  32
-#define VFS_NAME_MAX     107        /* what PFS3 allows; ext2's 255 is cut */
+#define VFS_NAME_MAX     255        /* ext2's limit; PFS3 stops at 107 */
 
 /* Errors are negative. */
 #define VFS_OK        0
@@ -26,9 +26,19 @@
 #define VFS_EBUSY    (-8)   /* volume name taken; or unmounting with files open */
 #define VFS_EINVAL   (-9)
 #define VFS_EROFS    (-10)  /* read-only filesystem */
+#define VFS_EEXIST   (-11)  /* the name is taken - perhaps only by case */
+#define VFS_ENOSPC   (-12)  /* no blocks, or no inodes, left */
+#define VFS_ENOTEMPTY (-13)
+
+/* vfs_open_flags */
+#define VFS_O_READ    0x00
+#define VFS_O_WRITE   0x01
+#define VFS_O_CREATE  0x02  /* make it if it is not there */
+#define VFS_O_TRUNC   0x04  /* empty it if it is */
 
 #define VFS_FILE  1
 #define VFS_DIR   2
+#define VFS_LINK  3      /* a symbolic link: listed, not followed, not opened */
 
 /* What a filesystem driver calls a file. The VFS keeps it in the handle and
  * never looks inside priv. */
@@ -72,6 +82,20 @@ struct fs_ops {
      * produced, 0 at the end, negative on error. */
     int  (*readdir)(void *fsdata, const struct vfs_node *dir,
                     unsigned long *cookie, struct vfs_dirent *out);
+
+    /* --- a writable filesystem has all of these; a read-only one, none --- */
+
+    /* type is VFS_FILE or VFS_DIR. The name is known not to exist. */
+    int  (*create)(void *fsdata, const struct vfs_node *dir, const char *name,
+                   unsigned long type, struct vfs_node *out);
+    /* Extends the file as needed; node->size is kept up to date. */
+    long (*write)(void *fsdata, struct vfs_node *node, unsigned long offset,
+                  const void *buf, unsigned long len);
+    int  (*truncate)(void *fsdata, struct vfs_node *node);          /* to nothing */
+    /* A file, or an empty directory. */
+    int  (*remove)(void *fsdata, const struct vfs_node *dir, const char *name);
+    /* Everything the driver has been keeping to itself, onto the disk. */
+    int  (*sync)(void *fsdata);
 };
 
 void vfs_init(void);
@@ -87,7 +111,12 @@ int  vfs_mount_info(unsigned long index, const char **volume,
 
 int  vfs_stat(const char *path, struct vfs_stat *out);
 
-int  vfs_open(const char *path);            /* a handle >= 1, or an error */
+int  vfs_open(const char *path);            /* to read: a handle >= 1, or an error */
+int  vfs_open_flags(const char *path, unsigned long flags);
+long vfs_write(int handle, const void *buf, unsigned long len);
+int  vfs_mkdir(const char *path);
+int  vfs_remove(const char *path);          /* a file, or an empty directory */
+int  vfs_sync(void);                        /* every mounted volume */
 long vfs_read(int handle, void *buf, unsigned long len);
 long vfs_seek(int handle, unsigned long offset);
 int  vfs_close(int handle);

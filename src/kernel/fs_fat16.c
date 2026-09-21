@@ -173,5 +173,6 @@ static long fat_read(void *fsdata, struct vfs_node *node, unsigned long offset,
 
 const struct fs_ops fat16_fs = {
     "fat16", fat_probe, fat_mount, fat_unmount,
-    fat_root, fat_lookup, fat_read, fat_readdir
+    fat_root, fat_lookup, fat_read, fat_readdir,
+    0, 0, 0, 0, 0                       /* read-only: nothing that writes */
 };

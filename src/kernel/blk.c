@@ -12,14 +12,15 @@ static unsigned char block_buf[BLK_SIZE];
 
 /* ----------------------------------------------------------- partitions --- */
 
+/* A partition's blkdev carries a pointer to its own partition in hw. The
+ * first version searched the table for it on every read and write, which
+ * the profiler priced at 7% of a file write. read == part_read is what says
+ * a blkdev is a partition at all. */
+static int part_read(const struct blkdev *dev, unsigned long lba, unsigned count, void *buf);
+
 static struct blk_partition *as_partition(const struct blkdev *dev)
 {
-    int i;
-
-    for (i = 0; i < nparts; i++)
-        if (dev == &parts[i].bd)
-            return &parts[i];
-    return 0;
+    return dev->read == part_read ? (struct blk_partition *)dev->hw : 0;
 }
 
 const struct blk_partition *blk_partition_of(const struct blkdev *dev)
@@ -107,7 +108,7 @@ static void scan_partitions(const struct blkdev *disk)
         p->bd.name    = p->name;
         p->bd.read    = part_read;
         p->bd.present = part_present;
-        p->bd.hw      = 0;
+        p->bd.hw      = p;
         p->bd.write   = disk->write ? part_write : 0;
         p->bd.blocks  = rp.sectors;
 

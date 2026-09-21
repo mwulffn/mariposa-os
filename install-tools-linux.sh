@@ -35,7 +35,7 @@ echo ""
 # Step 1: Install system packages
 echo -e "${GREEN}[1/5] Installing system packages...${NC}"
 sudo apt update
-sudo apt install -y build-essential curl wget mtools
+sudo apt install -y build-essential curl wget mtools e2fsprogs
 
 # Step 2: Install VASM
 echo ""

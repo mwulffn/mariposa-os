@@ -162,10 +162,11 @@ static const char *vfs_error(long rc)
     static const char *const text[] = {
         "ok", "no such file, directory or volume", "I/O error", "bad handle",
         "not a directory", "is a directory", "too many open", "no such device, "
-        "or no filesystem on it", "busy", "invalid argument", "read-only filesystem"
+        "or no filesystem on it", "busy", "invalid argument", "read-only filesystem",
+        "that name is taken", "no space left", "directory not empty"
     };
 
-    return (rc <= 0 && rc >= -10) ? text[-rc] : "error";
+    return (rc <= 0 && rc >= -13) ? text[-rc] : "error";
 }
 
 static void cmd_mount(struct device *con, const char *arg)
@@ -240,6 +241,53 @@ static void cmd_cat(struct device *con, const char *arg)
     vfs_close(h);
 }
 
+/* write <path> <text...>: make the file hold that one line. Enough to prove
+ * a filesystem takes writes, which is all a console owes anyone. */
+static void cmd_write(struct device *con, const char *arg)
+{
+    char path[128];
+    unsigned long n = 0;
+    long rc;
+    int h;
+
+    while (*arg && *arg != ' ' && n < sizeof path - 1)
+        path[n++] = *arg++;
+    path[n] = '\0';
+    while (*arg == ' ')
+        arg++;
+    if (!path[0] || !*arg) {
+        say(con, "write: write <path> <text>\n");
+        return;
+    }
+    h = vfs_open_flags(path, VFS_O_WRITE | VFS_O_CREATE | VFS_O_TRUNC);
+    if (h < 0) {
+        say(con, "write: %s\n", vfs_error(h));
+        return;
+    }
+    rc = vfs_write(h, arg, str_len(arg));
+    if (rc >= 0)
+        rc = vfs_write(h, "\n", 1);
+    if (rc < 0)
+        say(con, "write: %s\n", vfs_error(rc));
+    vfs_close(h);
+}
+
+static void cmd_mkdir(struct device *con, const char *arg)
+{
+    int rc = *arg ? vfs_mkdir(arg) : VFS_EINVAL;
+
+    if (rc != VFS_OK)
+        say(con, "mkdir: %s\n", vfs_error(rc));
+}
+
+static void cmd_rm(struct device *con, const char *arg)
+{
+    int rc = *arg ? vfs_remove(arg) : VFS_EINVAL;
+
+    if (rc != VFS_OK)
+        say(con, "rm: %s\n", vfs_error(rc));
+}
+
 static void cmd_bcache(struct device *con, const char *arg)
 {
     unsigned long total = bc_hits + bc_misses;
@@ -284,6 +332,9 @@ static const struct {
     { "mount", cmd_mount, "volumes and block devices" },
     { "ls",   cmd_ls,   "list a directory: ls boot:docs" },
     { "cat",  cmd_cat,  "print a file: cat boot:readme.txt" },
+    { "write", cmd_write, "put a line of text in a file: write sys:note.txt hello" },
+    { "mkdir", cmd_mkdir, "make a directory" },
+    { "rm",   cmd_rm,   "remove a file or an empty directory" },
     { "bcache", cmd_bcache, "block cache hits and misses" },
     { "keys", cmd_keys, "show keyboard events until a key is pressed here" },
     { "keymap", cmd_keymap, "show the keyboard layout, or set it: keymap dk" },

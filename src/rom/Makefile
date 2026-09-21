@@ -35,10 +35,12 @@ LIBSUP_SRC = ../kernel/libsup.s
 # Shared with the kernel. serial_hw.c is the UART register layer; the
 # polling versus interrupt strategy is NOT shared - see serial_hw.h.
 SHARED_SRC = ../shared/serial_hw.c ../shared/ata.c \
-             ../shared/rdb.c ../shared/fat16.c ../shared/memmap.c
+             ../shared/rdb.c ../shared/fat16.c ../shared/ext2.c \
+             ../shared/memmap.c
 SOBJ = $(addprefix $(BUILD)/,$(notdir $(SHARED_SRC:.c=.o)))
 
-OBJ = $(BUILD)/bootstrap.o $(CSRC:%.c=$(BUILD)/%.o) $(SOBJ) $(BUILD)/libsup.o
+OBJ = $(BUILD)/bootstrap.o $(CSRC:%.c=$(BUILD)/%.o) $(SOBJ) $(BUILD)/libsup.o \
+      $(BUILD)/ata_pio.o
 
 .PHONY: all clean
 
@@ -49,6 +51,11 @@ $(BUILD):
 
 $(BUILD)/bootstrap.o: $(ASM_MAIN) $(ASM_INC) $(INCS) | $(BUILD)
 	$(ASM) $(AFLAGS) -o $@ $(ASM_MAIN)
+
+# The PIO data loops, in assembly because every byte on the disk goes through
+# them. Shared with the kernel, like the ATA code that calls them.
+$(BUILD)/ata_pio.o: ../shared/ata_pio.s | $(BUILD)
+	$(ASM) $(AFLAGS) -o $@ $<
 
 $(BUILD)/libsup.o: $(LIBSUP_SRC) | $(BUILD)
 	$(ASM) $(AFLAGS) -o $@ $<

@@ -769,6 +769,21 @@ void h_detach_disk(void)
 
 uint32_t h_disk_sectors(void) { return g_disk_sectors; }
 
+/* Write `count` sectors of the in-memory disk, from `lba`, to a file - so
+ * that a test can hand what the guest wrote to a host tool that knows the
+ * format better than the test does. */
+int h_disk_save(const char *path, uint32_t lba, uint32_t count)
+{
+    FILE *f;
+    size_t n;
+
+    if (!g_disk || lba + count > g_disk_sectors || !(f = fopen(path, "wb")))
+        return -1;
+    n = fwrite(g_disk + (size_t)lba * 512, 512, count, f);
+    fclose(f);
+    return n == count ? 0 : -1;
+}
+
 unsigned h_disk_commands(void)        { return g_ata_commands; }
 unsigned h_disk_sectors_read(void)    { return g_ata_sectors_read; }
 unsigned h_disk_sectors_written(void) { return g_ata_sectors_written; }
@@ -1408,10 +1423,53 @@ h_result h_call(uint32_t pc)
     return h_run(pc);
 }
 
+/* --- profiler ---------------------------------------------------------------
+ *
+ * Off unless H_PROFILE names a file. Every instruction's cycles are charged
+ * to the 16-byte bin its PC falls in, over the kernel's address range, and
+ * the bins are dumped at exit for tools/profile.py to add up by function and
+ * by object file against the linker map. Cycle-exact, since the cycle counts
+ * are the 68000's own - this is where "the ext2 write path costs ten times
+ * what the disk does" stopped being a guess.
+ */
+#define PROF_BASE 0x200000u
+#define PROF_SIZE 0x080000u
+#define PROF_SHIFT 4
+
+static uint64_t *g_prof;
+static const char *g_prof_path;
+
+static void prof_dump(void)
+{
+    FILE *f = fopen(g_prof_path, "w");
+    uint32_t i;
+
+    if (!f)
+        return;
+    for (i = 0; i < (PROF_SIZE >> PROF_SHIFT); i++)
+        if (g_prof[i])
+            fprintf(f, "%x %llu\n", PROF_BASE + (i << PROF_SHIFT),
+                    (unsigned long long)g_prof[i]);
+    fclose(f);
+}
+
+static void prof_init(void)
+{
+    static int done;
+
+    if (done)
+        return;
+    done = 1;
+    g_prof_path = getenv("H_PROFILE");
+    if (g_prof_path && (g_prof = calloc(PROF_SIZE >> PROF_SHIFT, sizeof *g_prof)) != NULL)
+        atexit(prof_dump);
+}
+
 h_result h_run(uint32_t pc)
 {
     h_result r;
     memset(&r, 0, sizeof r);
+    prof_init();
 
     m68k_set_reg(M68K_REG_PC, pc);
 
@@ -1445,6 +1503,8 @@ h_result h_run(uint32_t pc)
          * sentinel, and a multi-instruction slice could step straight past it. */
         {
             uint64_t n = (uint64_t)m68k_execute(1);
+            if (g_prof && cur - PROF_BASE < PROF_SIZE)
+                g_prof[(cur - PROF_BASE) >> PROF_SHIFT] += n;
             r.cycles += n;
             g_cycles += n;
             serial_tx_tick();

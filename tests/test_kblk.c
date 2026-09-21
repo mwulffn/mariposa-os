@@ -3,8 +3,8 @@
  *
  * Against two-part.img (tests/mkdisk.py): an RDB whose partition list is
  * NOT at LBA 1 and has two entries chained by PART_NEXT, a FAT16 volume,
- * and a second partition where every block holds its own number - so a
- * read that lands in the wrong place says where it landed.
+ * a second partition where every block holds its own number - so a read
+ * that lands in the wrong place says where it landed - and a third, ext2.
  */
 #include "protocol.h"
 #include "disk_layout.h"
@@ -104,7 +104,7 @@ static void t_disk_is_found_and_sized(void)
 
 /* RDB_PARTLIST says where the first PART block is, PART_NEXT where the rest
  * are. The ROM's boot path reads LBA 1 and stops; here the list is at LBA 3
- * and has two entries. */
+ * and has three entries. */
 static void t_partition_list_is_followed(void)
 {
     uint32_t p0, p1;
@@ -114,7 +114,8 @@ static void t_partition_list_is_followed(void)
     p1 = find("ide0p1");
     CHECK(p0 != 0, "first partition not found - is LBA 1 hardcoded?");
     CHECK(p1 != 0, "second partition not found - is PART_NEXT followed?");
-    CHECK_U32(0, find("ide0p2"));
+    CHECK(find("ide0p2") != 0, "third partition not found");
+    CHECK_U32(0, find("ide0p3"));
     if (!p0 || !p1) return;
     CHECK_U32(DISK2_P1_SIZE, h_peek32(p0 + BD_BLOCKS));
     CHECK_U32(DISK2_P2_SIZE, h_peek32(p1 + BD_BLOCKS));

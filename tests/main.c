@@ -30,6 +30,7 @@ extern const test_suite kdisplay_suite;
 extern const test_suite kbitmap_suite;
 extern const test_suite kblk_suite;
 extern const test_suite kvfs_suite;
+extern const test_suite kext2_suite;
 
 /*
  * Position-independent kernel assembly, assembled to origin zero and loaded
@@ -56,6 +57,7 @@ static const struct { const char *name; uint32_t base; } modules[] = {
 void t_set_disk_dir(const char *dir);
 void t_kblk_set_disk_dir(const char *dir);
 void t_kvfs_set_disk_dir(const char *dir);
+void t_kext2_set_disk_dir(const char *dir);
 
 int main(int argc, char **argv)
 {
@@ -89,6 +91,7 @@ int main(int argc, char **argv)
     t_set_disk_dir(builddir);
     t_kblk_set_disk_dir(builddir);
     t_kvfs_set_disk_dir(builddir);
+    t_kext2_set_disk_dir(builddir);
 
     for (i = 0; i < (int)(sizeof modules / sizeof modules[0]); i++) {
         char path[512];
@@ -114,7 +117,7 @@ int main(int argc, char **argv)
                                       task_suite, kirq_suite,
                                       kinput_suite, kdisplay_suite,
                                       kbitmap_suite, kblk_suite,
-                                      kvfs_suite };
+                                      kvfs_suite, kext2_suite };
         rc = run_suites(suites, sizeof suites / sizeof suites[0], filter);
     }
 

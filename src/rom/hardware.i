@@ -177,6 +177,7 @@ PART_BUFFER     equ $021000         ; Partition block
 FS_BOOT_BUFFER  equ $022000         ; FAT16 boot sector
 FS_FAT_BUFFER   equ $022200         ; FAT sector cache
 FS_DIR_BUFFER   equ $022400         ; Root directory sector
+EXT2_WORK       equ $024000         ; ext2: three blocks of up to 4KB (disk.c)
 FS_VARS         equ $023000         ; struct fat16 - see src/shared/fat16.h
 
 ; ============================================================

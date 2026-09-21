@@ -99,10 +99,10 @@ static void t_mount_probes_the_filesystem(void)
 
 /* --- directories ----------------------------------------------------------- */
 
-/* struct vfs_dirent: name[108], type, size */
+/* struct vfs_dirent: name[256], type, size */
 static int list(const char *path, char names[][16], uint32_t *types, int max)
 {
-    uint32_t ent = scratch(120), a[2];
+    uint32_t ent = scratch(264), a[2];
     int32_t h = vopendir(path);
     int n = 0;
 
@@ -110,7 +110,7 @@ static int list(const char *path, char names[][16], uint32_t *types, int max)
     a[0] = (uint32_t)h; a[1] = ent;
     while (n < max && (int32_t)kcall("kernel:_vfs_readdir", 2, a) == 1) {
         h_peekstr(ent, names[n], 16);
-        types[n] = h_peek32(ent + 108);
+        types[n] = h_peek32(ent + 256);
         n++;
     }
     vclose(h);

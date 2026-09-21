@@ -26,6 +26,7 @@ struct handle {
     struct vfs_node node;
     unsigned long   pos;                /* file offset, or readdir cookie */
     int             is_dir;
+    int             writable;
 };
 
 static const struct fs_ops *filesystems[MAX_FS];
@@ -154,6 +155,8 @@ int vfs_unmount(const char *volume)
         mutex_unlock(&m->lock);
         return VFS_EBUSY;
     }
+    if (m->ops->sync)
+        m->ops->sync(m->fsdata);
     if (m->ops->unmount)
         m->ops->unmount(m->fsdata);
     bc_forget(m->raw);
@@ -190,7 +193,19 @@ int vfs_mount_info(unsigned long index, const char **volume,
  * Returns with the mount's lock HELD on success, since whatever the caller
  * does next with the node has to be under it.
  */
+static int walk_to(const char *path, struct mount **mount_out, struct vfs_node *out,
+                   char *leaf);
+
 static int walk(const char *path, struct mount **mount_out, struct vfs_node *out)
+{
+    return walk_to(path, mount_out, out, 0);
+}
+
+/* With `leaf` non-NULL, stop one short: *out is the directory and leaf gets
+ * the last component's name, which need not exist. leaf[0] is 0 if the path
+ * named a volume's root and so has no last component. */
+static int walk_to(const char *path, struct mount **mount_out, struct vfs_node *out,
+                   char *leaf)
 {
     char name[VFS_NAME_MAX + 1];
     const char *p = path, *colon;
@@ -198,6 +213,8 @@ static int walk(const char *path, struct mount **mount_out, struct vfs_node *out
     struct vfs_node node;
     int i, rc = VFS_OK;
 
+    if (leaf)
+        leaf[0] = '\0';
     for (colon = path; *colon && *colon != ':'; colon++)
         ;
     if (*colon) {
@@ -233,6 +250,20 @@ static int walk(const char *path, struct mount **mount_out, struct vfs_node *out
             name[n++] = *p++;
         }
         name[n] = '\0';
+        if (rc == VFS_OK && leaf) {
+            const char *rest = p;
+
+            while (*rest == '/')
+                rest++;
+            if (!*rest) {               /* that was the last component */
+                for (n = 0; name[n]; n++)
+                    leaf[n] = name[n];
+                leaf[n] = '\0';
+                if (node.type != VFS_DIR)
+                    rc = VFS_ENOTDIR;
+                break;
+            }
+        }
         if (rc == VFS_OK) {
             if (node.type != VFS_DIR)
                 rc = VFS_ENOTDIR;
@@ -266,12 +297,45 @@ int vfs_stat(const char *path, struct vfs_stat *out)
 
 /* --------------------------------------------------------------- handles --- */
 
-static int open_as(const char *path, int want_dir)
+/* Find path for writing, creating or emptying it as flags say. Returns with
+ * the mount locked on success, like walk(). */
+static int walk_for_write(const char *path, unsigned long flags,
+                          struct mount **mount_out, struct vfs_node *out)
+{
+    char leaf[VFS_NAME_MAX + 1];
+    struct vfs_node dir;
+    struct mount *m;
+    int rc = walk_to(path, &m, &dir, leaf);
+
+    if (rc != VFS_OK)
+        return rc;
+    if (!m->ops->write)
+        rc = VFS_EROFS;
+    else if (!leaf[0])
+        rc = VFS_EISDIR;                /* a volume's root is not a file */
+    else {
+        rc = m->ops->lookup(m->fsdata, &dir, leaf, out);
+        if (rc == VFS_ENOENT && (flags & VFS_O_CREATE))
+            rc = m->ops->create(m->fsdata, &dir, leaf, VFS_FILE, out);
+        else if (rc == VFS_OK && out->type == VFS_FILE && (flags & VFS_O_TRUNC))
+            rc = m->ops->truncate(m->fsdata, out);
+    }
+    if (rc != VFS_OK) {
+        mutex_unlock(&m->lock);
+        return rc;
+    }
+    *mount_out = m;
+    return VFS_OK;
+}
+
+static int open_as(const char *path, int want_dir, unsigned long flags)
 {
     struct vfs_node node;
     struct mount *m;
-    int i, rc = walk(path, &m, &node);
+    int i, rc;
 
+    rc = (flags & VFS_O_WRITE) ? walk_for_write(path, flags, &m, &node)
+                               : walk(path, &m, &node);
     if (rc != VFS_OK)
         return rc;
 
@@ -279,6 +343,8 @@ static int open_as(const char *path, int want_dir)
         rc = VFS_ENOTDIR;
     else if (!want_dir && node.type == VFS_DIR)
         rc = VFS_EISDIR;
+    else if (node.type != VFS_FILE && node.type != VFS_DIR)
+        rc = VFS_EINVAL;                /* a symlink: nothing follows them yet */
     else {
         rc = VFS_EMFILE;
         CRITICAL_ENTER();
@@ -289,6 +355,7 @@ static int open_as(const char *path, int want_dir)
                 handles[i].node   = node;
                 handles[i].pos    = 0;
                 handles[i].is_dir = want_dir;
+                handles[i].writable = (flags & VFS_O_WRITE) != 0;
                 rc = i + 1;
                 break;
             }
@@ -300,8 +367,13 @@ static int open_as(const char *path, int want_dir)
     return rc;
 }
 
-int vfs_open(const char *path)    { return open_as(path, 0); }
-int vfs_opendir(const char *path) { return open_as(path, 1); }
+int vfs_open(const char *path)    { return open_as(path, 0, VFS_O_READ); }
+int vfs_opendir(const char *path) { return open_as(path, 1, VFS_O_READ); }
+
+int vfs_open_flags(const char *path, unsigned long flags)
+{
+    return open_as(path, 0, flags);
+}
 
 static struct handle *get(int handle, int want_dir)
 {
@@ -326,6 +398,78 @@ long vfs_read(int handle, void *buf, unsigned long len)
         h->pos += (unsigned long)n;
     mutex_unlock(&h->mount->lock);
     return n;
+}
+
+long vfs_write(int handle, const void *buf, unsigned long len)
+{
+    struct handle *h = get(handle, 0);
+    long n;
+
+    if (!h || !h->writable)
+        return VFS_EBADF;
+    mutex_lock(&h->mount->lock);
+    n = h->mount->ops->write(h->mount->fsdata, &h->node, h->pos, buf, len);
+    if (n > 0)
+        h->pos += (unsigned long)n;
+    mutex_unlock(&h->mount->lock);
+    return n;
+}
+
+int vfs_mkdir(const char *path)
+{
+    char leaf[VFS_NAME_MAX + 1];
+    struct vfs_node dir, made;
+    struct mount *m;
+    int rc = walk_to(path, &m, &dir, leaf);
+
+    if (rc != VFS_OK)
+        return rc;
+    if (!m->ops->create)
+        rc = VFS_EROFS;
+    else if (!leaf[0])
+        rc = VFS_EEXIST;
+    else if (m->ops->lookup(m->fsdata, &dir, leaf, &made) == VFS_OK)
+        rc = VFS_EEXIST;                /* including by case: Docs and docs */
+    else
+        rc = m->ops->create(m->fsdata, &dir, leaf, VFS_DIR, &made);
+    mutex_unlock(&m->lock);
+    return rc;
+}
+
+int vfs_remove(const char *path)
+{
+    char leaf[VFS_NAME_MAX + 1];
+    struct vfs_node dir;
+    struct mount *m;
+    int rc = walk_to(path, &m, &dir, leaf);
+
+    if (rc != VFS_OK)
+        return rc;
+    if (!m->ops->remove)
+        rc = VFS_EROFS;
+    else if (!leaf[0])
+        rc = VFS_EBUSY;                 /* a volume's root */
+    else
+        rc = m->ops->remove(m->fsdata, &dir, leaf);
+    mutex_unlock(&m->lock);
+    return rc;
+}
+
+int vfs_sync(void)
+{
+    int i, rc = VFS_OK;
+
+    for (i = 0; i < VFS_MAX_MOUNTS; i++) {
+        struct mount *m = &mounts[i];
+
+        if (!m->ops || !m->ops->sync)
+            continue;
+        mutex_lock(&m->lock);
+        if (m->ops && m->ops->sync(m->fsdata) != VFS_OK)
+            rc = VFS_EIO;
+        mutex_unlock(&m->lock);
+    }
+    return rc;
 }
 
 long vfs_seek(int handle, unsigned long offset)
@@ -361,6 +505,8 @@ int vfs_close(int handle)
     h = &handles[handle - 1];
     m = h->mount;
     mutex_lock(&m->lock);
+    if (h->writable && m->ops->sync)
+        m->ops->sync(m->fsdata);        /* closing a written file is a promise */
     h->mount = 0;
     m->open_count--;
     mutex_unlock(&m->lock);

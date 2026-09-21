@@ -39,7 +39,7 @@ echo ""
 
 # Step 1: Install system packages via Homebrew
 echo -e "${GREEN}[1/5] Installing system packages via Homebrew...${NC}"
-brew install wget mtools
+brew install wget mtools e2fsprogs
 
 # Step 2: Install VASM
 echo ""

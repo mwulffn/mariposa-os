@@ -129,14 +129,20 @@ static struct buf *claim(const struct blkdev *dev, unsigned long lba)
     return b;
 }
 
+/* blkcopy.s. Callers' buffers are nearly always even - block buffers are
+ * allocated, and the allocator aligns to 8 - but nothing promises it. */
+void blk_copy512(void *to, const void *from);
+
 static void copy_block(unsigned char *to, const unsigned char *from)
 {
-    const unsigned long *f = (const unsigned long *)from;
-    unsigned long *t = (unsigned long *)to;
     int i;
 
-    for (i = 0; i < BLK_SIZE / 4; i++)  /* buffers are long aligned */
-        *t++ = *f++;
+    if (!(((unsigned long)to | (unsigned long)from) & 1)) {
+        blk_copy512(to, from);
+        return;
+    }
+    for (i = 0; i < BLK_SIZE; i++)
+        to[i] = from[i];
 }
 
 void bc_init(void)

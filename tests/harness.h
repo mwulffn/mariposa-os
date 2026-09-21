@@ -401,6 +401,9 @@ int      h_attach_disk(const char *path);
  * test cannot damage the image the next one reads. These count what the
  * guest has asked of the drive since the image was attached - the only way
  * to see a cache working is to see the commands it did not send. */
+/* Dump part of the in-memory disk to a file, for a host tool to judge. */
+int      h_disk_save(const char *path, uint32_t lba, uint32_t count);
+
 unsigned h_disk_commands(void);
 unsigned h_disk_sectors_read(void);
 unsigned h_disk_sectors_written(void);

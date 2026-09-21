@@ -101,6 +101,7 @@ FROM debian:bookworm-slim AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
         make \
         mtools \
+        e2fsprogs \
         python3 \
         gcc \
         libc6-dev \
@@ -108,6 +109,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# e2fsprogs: tests/mkdisk.py builds the ext2 test partition with the real
+# mke2fs, so that what the driver is tested against is what Linux makes.
 # python3: src/rom/Makefile runs tests/mksym.py to emit the ROM symbol table.
 # gcc + libc6-dev: the headless tests in tests/ are host-native C.
 # git: only needed if Musashi has to be fetched, which the layer below avoids.

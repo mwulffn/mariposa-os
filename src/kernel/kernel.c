@@ -138,6 +138,7 @@ static void print_memory_map(struct mem_entry *map)
 }
 
 extern const struct fs_ops fat16_fs;
+extern const struct fs_ops ext2_fs;
 
 /*
  * Find the disks and mount the partition the ROM loaded us from as "boot:".
@@ -151,6 +152,7 @@ static void storage_init(const struct bootinfo *bi)
 
     bc_init();
     vfs_init();
+    vfs_register_fs(&ext2_fs);      /* first: its magic is the better test */
     vfs_register_fs(&fat16_fs);
 
     n = blk_init();
