@@ -355,6 +355,32 @@ void wake_all(struct waitq *q)
     resched_if_task_level();
 }
 
+/* ---------------------------------------------------------------- mutex --- */
+
+/* Who holds it before there are tasks: anything that is not NULL. */
+#define BOOT_OWNER ((struct task *)1)
+
+void mutex_lock(struct mutex *m)
+{
+    struct task *me = sched_can_block() ? current : BOOT_OWNER;
+
+    CRITICAL_ENTER();
+    /* A loop: being woken means the lock was free a moment ago, not that
+     * it still is - someone running may have taken it first. */
+    while (m->owner && sched_can_block())
+        task_wait(&m->waiters);
+    m->owner = me;
+    CRITICAL_EXIT();
+}
+
+void mutex_unlock(struct mutex *m)
+{
+    CRITICAL_ENTER();
+    m->owner = 0;
+    CRITICAL_EXIT();
+    wake_one(&m->waiters);
+}
+
 int task_on_exit(void (*hook)(struct task *t))
 {
     int i, rc = -1;

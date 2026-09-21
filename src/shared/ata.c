@@ -11,7 +11,10 @@
  * enough that a dead one does not hang the boot. */
 #define ATA_TIMEOUT 0x100000UL
 
-#define ATA_CMD_READ    0x20
+#define ATA_CMD_READ     0x20
+#define ATA_CMD_WRITE    0x30
+#define ATA_CMD_FLUSH    0xE7
+#define ATA_CMD_IDENTIFY 0xEC
 #define ATA_LBA_MASTER  0xE0
 
 #define SECTOR_WORDS    256
@@ -111,4 +114,70 @@ int ata_read_sectors(const struct ata_if *ifc, unsigned long lba,
         return -1;
 
     return 0;
+}
+
+int ata_write_sectors(const struct ata_if *ifc, unsigned long lba,
+                      unsigned count, const void *buf)
+{
+    const unsigned short *in = (const unsigned short *)buf;
+    unsigned sector;
+
+    if (count == 0 || count > ATA_MAX_SECTORS)
+        return -1;
+
+    if (wait_not_busy(ifc) != 0)
+        return -1;
+
+    select_lba(ifc, lba, count);
+    *ifc->reg(ATA_REG_COMMAND) = ATA_CMD_WRITE;
+
+    for (sector = 0; sector < count; sector++) {
+        int word;
+
+        /* The drive asks for each sector in turn. Word writes, for the same
+         * reason the read path uses word reads: bytes reach the disk in the
+         * order they sit in memory. */
+        if (wait_drq(ifc) != 0)
+            return -1;
+        for (word = 0; word < SECTOR_WORDS; word++)
+            *ifc->data = *in++;
+    }
+
+    if (wait_not_busy(ifc) != 0)
+        return -1;
+    return (ata_status(ifc) & ATA_SR_ERR) ? -1 : 0;
+}
+
+int ata_flush(const struct ata_if *ifc)
+{
+    if (wait_not_busy(ifc) != 0)
+        return -1;
+    *ifc->reg(ATA_REG_COMMAND) = ATA_CMD_FLUSH;
+    if (wait_not_busy(ifc) != 0)
+        return -1;
+    return (ata_status(ifc) & ATA_SR_ERR) ? -1 : 0;
+}
+
+unsigned long ata_capacity(const struct ata_if *ifc, void *buf512)
+{
+    unsigned short *out = (unsigned short *)buf512;
+    const unsigned char *id = (const unsigned char *)buf512;
+    int word;
+
+    if (wait_not_busy(ifc) != 0)
+        return 0;
+    *ifc->reg(ATA_REG_SELECT) = 0xE0;               /* master, LBA */
+    *ifc->reg(ATA_REG_COMMAND) = ATA_CMD_IDENTIFY;
+    if (wait_drq(ifc) != 0)
+        return 0;
+    for (word = 0; word < SECTOR_WORDS; word++)
+        *out++ = *ifc->data;
+
+    /* IDENTIFY words are little-endian and the buffer holds them in wire
+     * order, so they are picked apart by byte. Word 49 bit 9: LBA. Words
+     * 60-61: the number of addressable sectors. */
+    if (!(id[49 * 2 + 1] & 0x02))
+        return 0;
+    return (unsigned long)id[60 * 2] | ((unsigned long)id[60 * 2 + 1] << 8) |
+           ((unsigned long)id[61 * 2] << 16) | ((unsigned long)id[61 * 2 + 1] << 24);
 }

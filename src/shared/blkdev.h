@@ -29,6 +29,16 @@ struct blkdev {
 
     /* Transport state, owned by whoever built this struct. */
     const void *hw;
+
+    /* The kernel's additions. The ROM's devices leave them zero: it never
+     * writes, and it never asks how big a disk is. */
+
+    /* Write `count` blocks. NULL on a device that cannot be written. */
+    int (*write)(const struct blkdev *dev, unsigned long lba,
+                 unsigned count, const void *buf);
+
+    /* How many blocks there are, or 0 if unknown. */
+    unsigned long blocks;
 };
 
 #endif /* BLKDEV_H */

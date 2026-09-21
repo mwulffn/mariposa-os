@@ -64,7 +64,11 @@ BIGCYL_HIGHCYL = 20001
 
 
 def sysbin_byte(i):
-    return (i * 31 + 7) & 0xFF
+    # The term in i >> 8 matters: without it the pattern repeats every 256
+    # bytes, every 512-byte cluster is identical, and a loader that reads
+    # SYSTEM.BIN's scattered chain in the wrong order passes. It did not, as
+    # it happens - but for a long time nothing here could have said so.
+    return (i * 31 + 7 + (i >> 8) * 11) & 0xFF
 
 
 def sysbin_data():
@@ -84,28 +88,28 @@ def amiga_checksum(block, summed_longs):
     return (-total) & 0xFFFFFFFF
 
 
-def rdb_block(lowcyl_unused=None):
+def rdb_block(lowcyl_unused=None, partlist=1, total_cyl=None):
     b = bytearray(SECTOR)
     struct.pack_into(">4sII", b, 0, b"RDSK", 64, 0)  # id, summedlongs, chksum
     struct.pack_into(">I", b, 12, 7)  # hostid
     struct.pack_into(">I", b, 16, SECTOR)  # blockbytes
     struct.pack_into(">I", b, 20, 0)  # flags
     struct.pack_into(">I", b, 24, 0xFFFFFFFF)  # badblocklist
-    struct.pack_into(">I", b, 28, 1)  # partitionlist -> LBA 1
+    struct.pack_into(">I", b, 28, partlist)  # partitionlist: LBA 1 unless told
     struct.pack_into(">I", b, 32, 0xFFFFFFFF)  # filesysheaderlist
     struct.pack_into(">I", b, 36, 0xFFFFFFFF)  # driveinit
-    struct.pack_into(">I", b, 64, TOTAL_CYL)
+    struct.pack_into(">I", b, 64, total_cyl or TOTAL_CYL)
     struct.pack_into(">I", b, 68, SECTORS)
     struct.pack_into(">I", b, 72, HEADS)
     struct.pack_into(">I", b, 8, amiga_checksum(b, 64))
     return bytes(b)
 
 
-def part_block(lowcyl, highcyl, name=b"DH0"):
+def part_block(lowcyl, highcyl, name=b"DH0", next_block=0xFFFFFFFF, dostype=0x46415431):
     b = bytearray(SECTOR)
     struct.pack_into(">4sII", b, 0, b"PART", 64, 0)
     struct.pack_into(">I", b, 12, 7)  # hostid
-    struct.pack_into(">I", b, 16, 0xFFFFFFFF)  # next: end of list
+    struct.pack_into(">I", b, 16, next_block)  # next PART, or end of list
     struct.pack_into(">I", b, 20, 1)  # flags: bootable
     struct.pack_into(">I", b, 32, 0)  # devflags
     b[36] = len(name)  # BCPL string
@@ -121,7 +125,7 @@ def part_block(lowcyl, highcyl, name=b"DH0"):
     struct.pack_into(">I", b, env + 36, lowcyl)
     struct.pack_into(">I", b, env + 40, highcyl)
     struct.pack_into(">I", b, env + 44, 30)  # numbuffers
-    struct.pack_into(">I", b, env + 64, 0x46415431)  # dostype 'FAT1'
+    struct.pack_into(">I", b, env + 64, dostype)  # 'FAT1' unless told otherwise
     struct.pack_into(">I", b, 8, amiga_checksum(b, 64))
     return bytes(b)
 
@@ -222,6 +226,107 @@ def build_main_image():
     img[SECTOR : 2 * SECTOR] = part_block(LOWCYL, HIGHCYL)
     part = build_partition()
     img[PART_START * SECTOR : PART_START * SECTOR + len(part)] = part
+    return bytes(img)
+
+
+# The kernel's disk: two partitions, and a FAT16 volume with things in it.
+#
+# The PART blocks are deliberately NOT at LBA 1 and are chained, because the
+# ROM's boot path reads LBA 1 and stops, and the kernel must not inherit
+# that: RDB_PARTLIST says where the first one is and PART_NEXT where the
+# rest are. The second partition holds no filesystem; every block of it is
+# its own number repeated, so a read that lands in the wrong place says
+# where it landed.
+P2_LOWCYL = HIGHCYL + 1
+P2_HIGHCYL = P2_LOWCYL + 7
+P2_START = P2_LOWCYL * HEADS * SECTORS
+P2_SIZE = (P2_HIGHCYL - P2_LOWCYL + 1) * HEADS * SECTORS
+TWO_TOTAL_CYL = P2_HIGHCYL + 1
+
+DOCS_CLUSTER = 100
+NOTES_CLUSTER = 101
+DEEP_CLUSTER = 102
+DATA_CHAIN = [110, 250, 111]  # scattered on purpose
+DATA_SIZE = 2 * SECTOR + 100
+README_TEXT = b"Mariposa test volume.\r\nThis is README.TXT, 64 bytes of it, padded out....\r\n"[:64]
+NOTES_TEXT = b"notes, in a subdirectory\n"
+
+
+def data_byte(i):
+    # Must not repeat with any period that divides a cluster, or every
+    # cluster holds the same bytes and reading the wrong one looks right.
+    # It did, at first: (i * 13 + 5) & 0xFF has period 256.
+    return (i * 13 + 5 + (i >> 8) * 7) & 0xFF
+
+
+def lfn_entry():
+    """A VFAT long-name entry, which an 8.3 reader must step over."""
+    e = bytearray(32)
+    e[0] = 0x41
+    e[1:11] = "notes".encode("utf-16-le")
+    e[11] = 0x0F
+    return bytes(e)
+
+
+def build_rich_partition():
+    part = bytearray(build_partition())
+
+    def put_cluster(cluster, data):
+        off = (DATA_START + (cluster - 2) * SEC_PER_CLUS) * SECTOR
+        part[off : off + len(data)] = data
+
+    def fat_set(cluster, value):
+        for n in range(NUM_FATS):
+            off = (RSVD + n * FAT_SIZE) * SECTOR + cluster * 2
+            struct.pack_into("<H", part, off, value)
+
+    put_cluster(README_CLUSTER, README_TEXT)
+
+    # root: add DOCS after what is already there
+    root = ROOT_DIR_START * SECTOR
+    slot = root
+    while part[slot] != 0:
+        slot += 32
+    part[slot : slot + 32] = dir_entry(b"DOCS       ", 0x10, DOCS_CLUSTER, 0)
+
+    docs = bytearray()
+    docs += dir_entry(b".          ", 0x10, DOCS_CLUSTER, 0)
+    docs += dir_entry(b"..         ", 0x10, 0, 0)
+    docs += lfn_entry()
+    docs += dir_entry(b"NOTES   TXT", 0x20, NOTES_CLUSTER, len(NOTES_TEXT))
+    docs += dir_entry(b"DEEP       ", 0x10, DEEP_CLUSTER, 0)
+    put_cluster(DOCS_CLUSTER, docs)
+    fat_set(DOCS_CLUSTER, 0xFFFF)
+
+    put_cluster(NOTES_CLUSTER, NOTES_TEXT)
+    fat_set(NOTES_CLUSTER, 0xFFFF)
+
+    deep = bytearray()
+    deep += dir_entry(b".          ", 0x10, DEEP_CLUSTER, 0)
+    deep += dir_entry(b"..         ", 0x10, DOCS_CLUSTER, 0)
+    deep += dir_entry(b"FILE    DAT", 0x20, DATA_CHAIN[0], DATA_SIZE)
+    put_cluster(DEEP_CLUSTER, deep)
+    fat_set(DEEP_CLUSTER, 0xFFFF)
+
+    data = bytes(data_byte(i) for i in range(DATA_SIZE))
+    for i, cluster in enumerate(DATA_CHAIN):
+        put_cluster(cluster, data[i * SECTOR : (i + 1) * SECTOR])
+        fat_set(cluster, DATA_CHAIN[i + 1] if i + 1 < len(DATA_CHAIN) else 0xFFFF)
+    return bytes(part)
+
+
+def build_two_partition_image():
+    img = bytearray(TWO_TOTAL_CYL * HEADS * SECTORS * SECTOR)
+    img[0:SECTOR] = rdb_block(partlist=3, total_cyl=TWO_TOTAL_CYL)
+    img[3 * SECTOR : 4 * SECTOR] = part_block(LOWCYL, HIGHCYL, b"DH0", next_block=5)
+    img[5 * SECTOR : 6 * SECTOR] = part_block(
+        P2_LOWCYL, P2_HIGHCYL, b"DH1", dostype=0x52415721  # 'RAW!'
+    )
+    part = build_rich_partition()
+    img[PART_START * SECTOR : PART_START * SECTOR + len(part)] = part
+    for blk in range(P2_SIZE):
+        off = (P2_START + blk) * SECTOR
+        img[off : off + SECTOR] = struct.pack(">I", blk) * (SECTOR // 4)
     return bytes(img)
 
 
@@ -352,11 +457,22 @@ HEADER = """\
 /* In a different FAT sector from the chain above, on purpose. */
 #define DISK_README_CLUSTER     %(readme)u
 #define DISK_README_FAT_SECTOR  %(readme_sec)u
-#define DISK_SYSBIN_BYTE(i)     ((unsigned char)(((i) * 31u + 7u) & 0xFFu))
+#define DISK_SYSBIN_BYTE(i)     ((unsigned char)(((i) * 31u + 7u + ((i) >> 8) * 11u) & 0xFFu))
 
 /* LowCyl * Heads here exceeds 65535, which partition.s's mulu.w cannot hold. */
 #define DISK_BIGCYL_LOWCYL      %(bigcyl)u
 #define DISK_BIGCYL_START_LBA   %(bigcyl_start)uu
+
+/* two-part.img: the kernel's disk */
+#define DISK2_IMAGE             "two-part.img"
+#define DISK2_TOTAL_SECTORS     %(two_total)uu
+#define DISK2_P1_START          %(part_start)uu
+#define DISK2_P1_SIZE           %(part_size)uu
+#define DISK2_P2_START          %(p2_start)uu
+#define DISK2_P2_SIZE           %(p2_size)uu
+#define DISK2_DATA_SIZE         %(data_size)uu
+#define DISK2_DATA_BYTE(i)      ((uint8_t)(((i) * 13u + 5u + ((i) >> 8) * 7u) & 0xFFu))
+#define DISK2_NOTES_TEXT        "notes, in a subdirectory\\n"
 
 #endif /* DISK_LAYOUT_H */
 """
@@ -378,6 +494,8 @@ def main(argv):
 
     with open(os.path.join(out, "test-disk.img"), "wb") as f:
         f.write(img)
+    with open(os.path.join(out, "two-part.img"), "wb") as f:
+        f.write(build_two_partition_image())
     with open(os.path.join(out, "blank.img"), "wb") as f:
         f.write(build_blank_image())
     with open(os.path.join(out, "bigcyl.img"), "wb") as f:
@@ -410,6 +528,10 @@ def main(argv):
                 "readme_sec": README_CLUSTER * 2 // BYTES_PER_SEC,
                 "bigcyl": BIGCYL_LOWCYL,
                 "bigcyl_start": BIGCYL_LOWCYL * HEADS * SECTORS,
+                "two_total": TWO_TOTAL_CYL * HEADS * SECTORS,
+                "p2_start": P2_START,
+                "p2_size": P2_SIZE,
+                "data_size": DATA_SIZE,
             }
         )
 

@@ -22,11 +22,13 @@ SYM     = $(BUILD)/kernel.sym
 ASRC    = crt0.s libsup.s cpu.s isr.s vectors.s switch.s dcon_draw.s
 CSRC    = kernel.c mem.c serial.c kprintf.c irq.c vector.c task.c dev.c console.c kstring.c \
           cia.c kbd.c input.c keymap.c \
-          display.c bitmap.c dcon.c font8x8.c
+          display.c bitmap.c dcon.c font8x8.c \
+          blk.c ide.c bcache.c vfs.c fs_fat16.c
 
 # Shared with the ROM: hardware definitions and the UART register
 # primitives. The waiting strategy is not shared - see serial_hw.h.
-SHARED_SRC = ../shared/serial_hw.c
+SHARED_SRC = ../shared/serial_hw.c ../shared/ata.c ../shared/rdb.c \
+             ../shared/fat16.c
 
 # Objects
 AOBJ    = $(ASRC:%.s=$(BUILD)/%.o)

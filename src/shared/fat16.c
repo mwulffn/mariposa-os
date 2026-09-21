@@ -159,3 +159,79 @@ long fat16_next_cluster(const struct blkdev *dev, struct fat16 *fs,
 
     return (long)le16(fat_buf, (unsigned)in_sec);
 }
+
+/* "NOTES   TXT" -> "NOTES.TXT" */
+static void format_name(const unsigned char *e, char *out)
+{
+    int i, n = 0;
+
+    for (i = 0; i < 8 && e[i] != ' '; i++)
+        out[n++] = (char)e[i];
+    if (e[8] != ' ') {
+        out[n++] = '.';
+        for (i = 8; i < 11 && e[i] != ' '; i++)
+            out[n++] = (char)e[i];
+    }
+    out[n] = '\0';
+}
+
+/* The sector holding directory entry `index`, or 0 past the end. */
+static unsigned long dir_sector(const struct blkdev *dev, struct fat16 *fs,
+                                unsigned long dir_cluster, unsigned long index,
+                                void *fat_buf)
+{
+    unsigned long sector = index / (FAT16_SECTOR_SIZE / DIR_ENTRY_SIZE);
+
+    if (dir_cluster == 0)
+        return sector < fs->root_dir_secs
+             ? fs->partition_lba + fs->root_dir_start + sector : 0;
+
+    /* A subdirectory is a cluster chain like any file. */
+    while (sector >= fs->sec_per_clus) {
+        long next = fat16_next_cluster(dev, fs, dir_cluster, fat_buf);
+
+        if (next < 2 || (unsigned long)next >= FAT16_EOF_MIN)
+            return 0;
+        dir_cluster = (unsigned long)next;
+        sector -= fs->sec_per_clus;
+    }
+    return fs->partition_lba + fs->data_start_sec +
+           (dir_cluster - 2) * fs->sec_per_clus + sector;
+}
+
+int fat16_readdir(const struct blkdev *dev, struct fat16 *fs,
+                  unsigned long dir_cluster, unsigned long *pos,
+                  void *sector_buf, void *fat_buf, struct fat16_dirent *out)
+{
+    const unsigned per_sector = FAT16_SECTOR_SIZE / DIR_ENTRY_SIZE;
+    unsigned long loaded = 0;
+
+    for (;; (*pos)++) {
+        unsigned long lba = dir_sector(dev, fs, dir_cluster, *pos, fat_buf);
+        const unsigned char *e;
+
+        if (lba == 0)
+            return FAT16_NOT_FOUND;
+        if (lba != loaded) {
+            if (dev->read(dev, lba, 1, sector_buf) != 0)
+                return FAT16_READ_ERROR;
+            loaded = lba;
+        }
+        e = (const unsigned char *)sector_buf + (*pos % per_sector) * DIR_ENTRY_SIZE;
+
+        if (e[DIR_NAME] == DIR_ENTRY_END)
+            return FAT16_NOT_FOUND;
+        if (e[DIR_NAME] == DIR_ENTRY_FREE || e[DIR_NAME] == '.')
+            continue;
+        if ((e[DIR_ATTR] & ATTR_LONG_NAME) == ATTR_LONG_NAME ||
+            (e[DIR_ATTR] & ATTR_VOLUME_ID))
+            continue;
+
+        format_name(e, out->name);
+        out->attr    = e[DIR_ATTR];
+        out->cluster = le16(e, DIR_FST_CLUSTER);
+        out->size    = le32(e, DIR_FILE_SIZE);
+        (*pos)++;
+        return FAT16_OK;
+    }
+}

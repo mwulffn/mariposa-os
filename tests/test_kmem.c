@@ -5,10 +5,9 @@
  * memory map it built itself, so pool shapes the real machine never has -
  * two fast regions, a 4KB chip pool - cost nothing to set up.
  *
- * The regions are picked to stay clear of everything else in the harness:
- * the position-independent modules at $100000-$12FFFF, the kernel image at
- * $200000, the scratch allocator at $280000 and the guest stack below
- * $2F0000.
+ * The chip region is picked to stay clear of the position-independent
+ * modules at $100000-$13FFFF. The fast regions are wherever h_kernel_heap()
+ * says is clear of the kernel image - which is not a constant.
  */
 #include "protocol.h"
 
@@ -28,9 +27,9 @@
 
 #define CHIP_BASE   0x140000u
 #define CHIP_SIZE   0x040000u
-#define FAST_BASE   0x210000u
+#define FAST_BASE   h_kernel_heap(0x50000u)
 #define FAST_SIZE   0x040000u
-#define FAST2_BASE  0x260000u
+#define FAST2_BASE  (FAST_BASE + 0x40000u)
 #define FAST2_SIZE  0x010000u
 #define SLOW_BASE   0xC00000u
 #define SLOW_SIZE   0x080000u
@@ -99,7 +98,7 @@ static void init_with(const region *rg, int n, uint32_t kernel_end)
 /* One chip pool, one fast pool: what the real machine looks like. */
 static void init_std(void)
 {
-    static const region rg[] = {
+    const region rg[] = {
         { CHIP_BASE, CHIP_SIZE, MEM_TYPE_CHIP },
         { FAST_BASE, FAST_SIZE, MEM_TYPE_FAST },
     };
@@ -130,7 +129,7 @@ static void t_init_reports_the_regions(void)
  * .bss. kernel_end does, and the heap must start above it. */
 static void t_init_keeps_clear_of_the_kernel(void)
 {
-    static const region rg[] = { { FAST_BASE, FAST_SIZE, MEM_TYPE_FAST } };
+    const region rg[] = { { FAST_BASE, FAST_SIZE, MEM_TYPE_FAST } };
     uint32_t kend = FAST_BASE + 0x1235;     /* odd, as _end has been */
     uint32_t p;
 
@@ -142,7 +141,7 @@ static void t_init_keeps_clear_of_the_kernel(void)
 
 static void t_two_regions_in_one_pool(void)
 {
-    static const region rg[] = {
+    const region rg[] = {
         { FAST2_BASE, FAST2_SIZE, MEM_TYPE_FAST },      /* small one first */
         { FAST_BASE,  FAST_SIZE,  MEM_TYPE_FAST },
     };
@@ -193,7 +192,7 @@ static void t_alloc_refuses_nonsense(void)
 /* Each named flag is a requirement, not a preference. */
 static void t_flags_pick_the_pool(void)
 {
-    static const region rg[] = {
+    const region rg[] = {
         { CHIP_BASE, CHIP_SIZE, MEM_TYPE_CHIP },
         { FAST_BASE, 0x1000,    MEM_TYPE_FAST },        /* tiny on purpose */
         { SLOW_BASE, 0x1000,    MEM_TYPE_SLOW },

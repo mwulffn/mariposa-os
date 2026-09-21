@@ -57,4 +57,15 @@ int ata_present(const struct ata_if *ifc);
 int ata_read_sectors(const struct ata_if *ifc, unsigned long lba,
                      unsigned count, void *buf);
 
+/* The kernel's. The ROM only ever reads. */
+int ata_write_sectors(const struct ata_if *ifc, unsigned long lba,
+                      unsigned count, const void *buf);
+
+/* Make the drive commit what it has been given. 0 on success. */
+int ata_flush(const struct ata_if *ifc);
+
+/* How many sectors the drive has, by IDENTIFY DEVICE; 0 if it will not say
+ * or does not do LBA. buf512 is scratch. */
+unsigned long ata_capacity(const struct ata_if *ifc, void *buf512);
+
 #endif /* ATA_H */

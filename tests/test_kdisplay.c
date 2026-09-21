@@ -32,7 +32,7 @@
 
 #define CHIP_BASE  0x140000u
 #define CHIP_SIZE  0x0A0000u
-#define FAST_BASE  0x210000u
+#define FAST_BASE   h_kernel_heap(0x40000u)
 #define FAST_SIZE  0x040000u
 
 static uint32_t kcall(const char *name, int nargs, const uint32_t *args)

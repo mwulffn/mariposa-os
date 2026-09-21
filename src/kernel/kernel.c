@@ -15,6 +15,9 @@
 #include "kbd.h"
 #include "display.h"
 #include "dcon.h"
+#include "blk.h"
+#include "bcache.h"
+#include "vfs.h"
 #include "vector.h"
 #include "irq.h"
 #include "cpu.h"
@@ -134,6 +137,46 @@ static void print_memory_map(struct mem_entry *map)
     pr_info("==================\n\n");
 }
 
+extern const struct fs_ops fat16_fs;
+
+/*
+ * Find the disks and mount the partition the ROM loaded us from as "boot:".
+ * The ROM says which one in the handoff, as a block number on the disk; the
+ * partition whose window starts there is it.
+ */
+static void storage_init(const struct bootinfo *bi)
+{
+    struct device *d;
+    int n;
+
+    bc_init();
+    vfs_init();
+    vfs_register_fs(&fat16_fs);
+
+    n = blk_init();
+    pr_info("Storage: %d block device%s, %luKB block cache\n", n, n == 1 ? "" : "s",
+            bc_blocks / 2);
+    if (!BOOTINFO_HAS(bi, boot_part_blocks) || bi->boot_dev_type != BOOTDEV_IDE)
+        return;
+
+    for (d = dev_next(0); d; d = dev_next(d)) {
+        const struct blk_partition *p;
+
+        if (d->class != DEV_BLOCK || !(p = blk_partition_of(d->hw)))
+            continue;
+        if (p->start == bi->boot_part_lba) {
+            int rc = vfs_mount("boot", d->name, 0);
+
+            if (rc == VFS_OK)
+                pr_info("Mounted %s (%s) as boot:\n", d->name, p->label);
+            else
+                pr_info("Could not mount %s as boot: (error %d)\n", d->name, rc);
+            return;
+        }
+    }
+    pr_info("The partition we booted from is not in the partition table\n");
+}
+
 static void print_boot_device(const struct bootinfo *bi)
 {
     /* Absent is not the same as none: a ROM older than the field cannot
@@ -218,6 +261,8 @@ void kernel_main(struct bootinfo *bi)
     sched_init(BOOTINFO_HAS(bi, cpu_type) ? bi->cpu_type : CPU_68000);
     pr_info("CPU: 680%02lu%s\n", cpu_type == CPU_68000 ? 0UL : cpu_type * 10,
             BOOTINFO_HAS(bi, fpu_type) && bi->fpu_type ? " with FPU" : "");
+    storage_init(bi);
+
     dcon_render();              /* by hand: the task that does it is not yet */
 
     irq_init();

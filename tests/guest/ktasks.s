@@ -27,6 +27,7 @@
         xdef    body_waker
         xdef    body_sampler
         xdef    body_caller2
+        xdef    body_locker
         xdef    body_grab_display
         xdef    body_masked_caller2
         xdef    isr_count_ack
@@ -157,6 +158,37 @@ body_grab_display:
         move.l  d0,32(a2)               ; its result
         addq.l  #1,(a2)
         rts
+
+; forever { lock(m); t = *shared; yield(); *shared = t + 1; unlock(m); counter++; }
+; A read-modify-write with a task switch in the middle of it: exactly what a
+; lock is for. Without one, two of these lose updates and *shared falls
+; behind the sum of their counters.
+;    4 yield   8 mutex   12 shared   16 lock   24 unlock
+; lock and unlock may be 0, for the test that wants to see it go wrong.
+body_locker:
+        move.l  4(sp),a2
+.loop:  move.l  16(a2),d0
+        beq.s   .nolock
+        move.l  d0,a0
+        move.l  8(a2),-(sp)
+        jsr     (a0)
+        addq.l  #4,sp
+.nolock:
+        move.l  12(a2),a3
+        move.l  (a3),d2
+        move.l  4(a2),a0
+        jsr     (a0)                    ; yield, holding the value
+        addq.l  #1,d2
+        move.l  d2,(a3)
+        move.l  24(a2),d0
+        beq.s   .nounlock
+        move.l  d0,a0
+        move.l  8(a2),-(sp)
+        jsr     (a0)
+        addq.l  #4,sp
+.nounlock:
+        addq.l  #1,(a2)
+        bra.s   .loop
 
 ; Load every register with a value derived from param, then spin checking
 ; them. Preemption lands wherever it lands; if any register ever differs,

@@ -78,6 +78,24 @@ void task_wait(struct waitq *q);
 void wake_one(struct waitq *q);
 void wake_all(struct waitq *q);
 
+/*
+ * A lock that may be held across a task switch. CRITICAL_ENTER is not one:
+ * it stops being a lock the moment the holder sleeps, and it holds off every
+ * interrupt in the machine while it lasts. Use this for anything long, or
+ * anything that waits - a disk transfer, a filesystem operation.
+ *
+ * Task context only, not recursive, no priority inheritance. Before the
+ * scheduler starts there is nobody to contend with and it always succeeds.
+ * Zero-initialised is unlocked.
+ */
+struct mutex {
+    struct task *owner;
+    struct waitq waiters;
+};
+
+void mutex_lock(struct mutex *m);
+void mutex_unlock(struct mutex *m);
+
 unsigned long sched_ticks(void);
 
 /* May the caller sleep? Only a task can: not a handler, and not the kernel

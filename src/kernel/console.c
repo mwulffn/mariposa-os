@@ -21,6 +21,9 @@
 #include "cpu.h"
 #include "input.h"
 #include "kbd.h"
+#include "vfs.h"
+#include "blk.h"
+#include "bcache.h"
 #include "kstring.h"
 
 #define LINE_MAX 80
@@ -154,6 +157,105 @@ static void cmd_keymap(struct device *con, const char *arg)
     say(con, "keymap: %s\n", input_keymap_name());
 }
 
+static const char *vfs_error(long rc)
+{
+    static const char *const text[] = {
+        "ok", "no such file, directory or volume", "I/O error", "bad handle",
+        "not a directory", "is a directory", "too many open", "no such device, "
+        "or no filesystem on it", "busy", "invalid argument", "read-only filesystem"
+    };
+
+    return (rc <= 0 && rc >= -10) ? text[-rc] : "error";
+}
+
+static void cmd_mount(struct device *con, const char *arg)
+{
+    const char *volume, *devname, *fstype;
+    unsigned long i;
+    struct device *d;
+
+    (void)arg;
+    for (i = 0; vfs_mount_info(i, &volume, &devname, &fstype); i++)
+        say(con, "%s:  on %s  (%s)\n", volume, devname, fstype);
+    if (i == 0)
+        say(con, "nothing is mounted\n");
+
+    for (d = dev_next(0); d; d = dev_next(d)) {
+        const struct blkdev *bd = d->hw;
+        const struct blk_partition *p;
+
+        if (d->class != DEV_BLOCK)
+            continue;
+        p = blk_partition_of(bd);
+        say(con, "  %-8s %8lu blocks  %s\n", d->name, bd->blocks, p ? p->label : "(whole disk)");
+    }
+}
+
+static void cmd_ls(struct device *con, const char *arg)
+{
+    struct vfs_dirent e;
+    int h = vfs_opendir(*arg ? arg : "boot:");
+    int rc;
+
+    if (h < 0) {
+        say(con, "ls: %s\n", vfs_error(h));
+        return;
+    }
+    while ((rc = vfs_readdir(h, &e)) == 1) {
+        if (e.type == VFS_DIR)
+            say(con, "%10s  %s/\n", "(dir)", e.name);
+        else
+            say(con, "%10lu  %s\n", e.size, e.name);
+    }
+    if (rc < 0)
+        say(con, "ls: %s\n", vfs_error(rc));
+    vfs_close(h);
+}
+
+/* Text as text, anything else as a dot: this is a console, not a pager. */
+static void cmd_cat(struct device *con, const char *arg)
+{
+    char buf[128];
+    long n, i;
+    int h;
+
+    if (!*arg) {
+        say(con, "cat: which file?\n");
+        return;
+    }
+    h = vfs_open(arg);
+    if (h < 0) {
+        say(con, "cat: %s\n", vfs_error(h));
+        return;
+    }
+    while ((n = vfs_read(h, buf, sizeof buf)) > 0) {
+        for (i = 0; i < n; i++)
+            if ((buf[i] < ' ' && buf[i] != '\n' && buf[i] != '\r' && buf[i] != '\t') ||
+                buf[i] == 0x7F)
+                buf[i] = '.';
+        chr_write(con, buf, (unsigned long)n);
+    }
+    if (n < 0)
+        say(con, "cat: %s\n", vfs_error(n));
+    vfs_close(h);
+}
+
+static void cmd_bcache(struct device *con, const char *arg)
+{
+    unsigned long total = bc_hits + bc_misses;
+
+    (void)arg;
+    if (!bc_blocks) {
+        say(con, "block cache: off - no memory for it\n");
+        return;
+    }
+    say(con, "block cache: %lu blocks (%luKB), %lu hits, %lu misses",
+        bc_blocks, bc_blocks / 2, bc_hits, bc_misses);
+    if (total)
+        say(con, " (%lu%% from memory)", bc_hits * 100 / total);
+    say(con, "\n");
+}
+
 extern void (*rom_panic)(void);
 
 /* Into the ROM debugger, on purpose, from a kernel that is fine. The flush
@@ -179,6 +281,10 @@ static const struct {
     { "ps",   cmd_ps,   "tasks, their state and stack headroom" },
     { "dev",  cmd_dev,  "registered devices" },
     { "irq",  cmd_irq,  "uptime and interrupt counters" },
+    { "mount", cmd_mount, "volumes and block devices" },
+    { "ls",   cmd_ls,   "list a directory: ls boot:docs" },
+    { "cat",  cmd_cat,  "print a file: cat boot:readme.txt" },
+    { "bcache", cmd_bcache, "block cache hits and misses" },
     { "keys", cmd_keys, "show keyboard events until a key is pressed here" },
     { "keymap", cmd_keymap, "show the keyboard layout, or set it: keymap dk" },
     { "debug", cmd_debug, "drop into the ROM debugger (r, m, ? there)" },

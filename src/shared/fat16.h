@@ -78,4 +78,28 @@ long fat16_next_cluster(const struct blkdev *dev, struct fat16 *fs,
 /* Bytes in a cluster. */
 unsigned long fat16_cluster_bytes(const struct fat16 *fs);
 
+/*
+ * Walking directories - the kernel's addition; the ROM only ever looks one
+ * name up in the root.
+ *
+ * dir_cluster is 0 for the root directory, which on FAT16 is not a cluster
+ * chain but a fixed run of sectors. *pos starts at 0 and is advanced past
+ * each entry returned. Skipped: deleted entries, the volume label, VFAT long
+ * name entries (the 8.3 alias is what is seen), and "." and "..".
+ *
+ * Returns FAT16_OK with *out filled, FAT16_NOT_FOUND at the end.
+ */
+#define FAT16_ATTR_DIR  0x10
+
+struct fat16_dirent {
+    char          name[13];         /* "README.TXT", NUL terminated */
+    unsigned char attr;
+    unsigned long cluster;
+    unsigned long size;
+};
+
+int fat16_readdir(const struct blkdev *dev, struct fat16 *fs,
+                  unsigned long dir_cluster, unsigned long *pos,
+                  void *sector_buf, void *fat_buf, struct fat16_dirent *out);
+
 #endif /* FAT16_H */

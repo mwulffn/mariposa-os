@@ -205,6 +205,18 @@ first. `.bss` lies past the end of the file and is just RAM, which `h_reset()`
 zeroes - crt0's job. Arguments follow vbcc: every one a longword, pushed
 right to left.
 
+**A test heap goes where `h_kernel_heap()` says, never at a constant.** Every
+kernel test used to put its heap at `$210000`. The kernel's `.bss` grew past
+that - the block cache alone is 128KB - and from then on every test heap lay
+on top of the kernel's own variables, and every test passed anyway, until a
+deliberately broken build shifted the layout enough for one to crash with an
+address error that had nothing to do with the breakage.
+
+**Test data must not repeat on a cluster boundary.** The generated files'
+byte patterns once had a period of 256, which made every 512-byte cluster
+identical: a loader that read a scattered chain in the wrong order would
+have passed. Found by a mutation that should have failed and did not.
+
 This is not a copy built for the tests. `kser.*` runs the interrupt-driven
 serial driver out of the image that boots.
 

@@ -150,6 +150,21 @@ instructions (64-bit multiply and divide, `MOVEP`), which `-cpu=68000` C
 never emits and the assembly here does not use; and the ROM's panic decoder
 knows only the 68000's bus error frame.
 
+## Mutex
+
+`struct mutex` is the lock that may be held across a task switch.
+`CRITICAL_ENTER` is not one: it stops being a lock the moment the holder
+sleeps, and it holds off every interrupt in the machine while it lasts. The
+IDE driver was its first user - a transfer is a sequence of register writes
+two tasks must not interleave, and a 256-sector read is far too long to
+mask interrupts for - followed by the block cache and each mounted volume.
+
+Task context only, not recursive, no priority inheritance. The wait is a
+loop: being woken means the lock was free a moment ago, not that it still
+is. Before the scheduler starts there is nobody to contend with and it
+always succeeds. `task.unlocked_do_race` is the control for
+`task.mutex_excludes`: the same tasks with no lock really do lose updates.
+
 ## Printing from tasks
 
 `kprintf` formats a line into a buffer on its own stack and hands it to
@@ -163,9 +178,6 @@ see `docs/serial_design.md`, "ser_write", for why that took three attempts.
 
 ## Not in the first cut
 
-- **A sleeping mutex.** `CRITICAL_ENTER` covers short sections. A lock that
-  can be held across blocking arrives with its first real user, probably the
-  filesystem.
 - **FPU context.** The slot is reserved, nothing fills it.
 - **Priority inheritance, dynamic priorities, per-task CPU accounting.**
 

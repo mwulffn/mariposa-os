@@ -26,7 +26,7 @@
 #define PRIO_NORMAL  2u
 #define PRIO_HIGH    3u
 
-#define HEAP_BASE   0x210000u
+#define HEAP_BASE   h_kernel_heap(0x40000u)
 #define HEAP_SIZE   0x040000u
 #define ALLOC_FAST  2u
 
@@ -382,6 +382,54 @@ static void kprintf_lines_stay_whole(int model, uint32_t cpu)
     CHECK(lines > 6, "only %d complete lines", lines);
 }
 
+/* --- mutex ------------------------------------------------------------------
+ *
+ * A lock that can be held across a task switch, which CRITICAL_ENTER cannot:
+ * masking interrupts stops being a lock the moment the holder sleeps. The
+ * IDE driver is the first thing to need one - a transfer is a sequence of
+ * register writes that two tasks must not interleave.
+ */
+static void lockers(int model, uint32_t cpu, int locked, uint32_t *shared_out, uint32_t *sum_out)
+{
+    uint8_t zero[16] = {0};
+    uint32_t m = h_alloc(zero, sizeof zero), shared = h_alloc(zero, sizeof zero);
+    uint32_t b[3];
+    int i;
+
+    setup(model, cpu);
+    for (i = 0; i < 3; i++) {
+        b[i] = block("kernel:_task_yield", m, shared, NULL);
+        if (locked) {
+            h_poke32(b[i] + 16, h_sym("kernel:_mutex_lock"));
+            h_poke32(b[i] + 24, h_sym("kernel:_mutex_unlock"));
+        }
+        spawn("locker", "body_locker", b[i], 1024, PRIO_NORMAL);
+    }
+    run(SLICE);
+    *shared_out = h_peek32(shared);
+    *sum_out = count(b[0]) + count(b[1]) + count(b[2]);
+}
+
+static void mutex_excludes(int model, uint32_t cpu)
+{
+    uint32_t shared, sum;
+
+    lockers(model, cpu, 1, &shared, &sum);
+    CHECK(sum > 100, "lockers ran %u laps", sum);
+    /* A lap still in flight has bumped shared and not yet its counter. */
+    CHECK(shared >= sum && shared <= sum + 3, "lost updates: %u increments, %u laps", shared, sum);
+}
+
+/* The control: the same tasks with no lock really do lose updates, so the
+ * test above is measuring the mutex and not the absence of a race. */
+static void unlocked_tasks_do_race(int model, uint32_t cpu)
+{
+    uint32_t shared, sum;
+
+    lockers(model, cpu, 0, &shared, &sum);
+    CHECK(shared + 10 < sum, "no race without a lock: %u increments, %u laps", shared, sum);
+}
+
 /* --- output that outruns the wire ------------------------------------------
  *
  * 9600 baud is about 7400 cycles a character and a task can produce text
@@ -725,6 +773,8 @@ ON(exit_is_reaped)
 ON(wait_and_wake)
 ON(wake_all_wakes_all)
 ON(kprintf_lines_stay_whole)
+ON(mutex_excludes)
+ON(unlocked_tasks_do_race)
 ON(full_ring_sleeps)
 ON(ticks_survive_heavy_output)
 ON(input_survives_heavy_output)
@@ -761,6 +811,8 @@ static const test_case tests[] = {
     T("wait_and_wake",      wait_and_wake),
     T("wake_all",           wake_all_wakes_all),
     T("kprintf_lines_whole", kprintf_lines_stay_whole),
+    T("mutex_excludes",     mutex_excludes),
+    T("unlocked_do_race",   unlocked_tasks_do_race),
     T("full_ring_sleeps",   full_ring_sleeps),
     T("ticks_survive_output", ticks_survive_heavy_output),
     T("input_survives_output", input_survives_heavy_output),

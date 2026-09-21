@@ -28,6 +28,8 @@ extern const test_suite kirq_suite;
 extern const test_suite kinput_suite;
 extern const test_suite kdisplay_suite;
 extern const test_suite kbitmap_suite;
+extern const test_suite kblk_suite;
+extern const test_suite kvfs_suite;
 
 /*
  * Position-independent kernel assembly, assembled to origin zero and loaded
@@ -52,6 +54,8 @@ static const struct { const char *name; uint32_t base; } modules[] = {
 
 /* Where mkdisk.py put the generated disk images. */
 void t_set_disk_dir(const char *dir);
+void t_kblk_set_disk_dir(const char *dir);
+void t_kvfs_set_disk_dir(const char *dir);
 
 int main(int argc, char **argv)
 {
@@ -83,6 +87,8 @@ int main(int argc, char **argv)
         return 2;
 
     t_set_disk_dir(builddir);
+    t_kblk_set_disk_dir(builddir);
+    t_kvfs_set_disk_dir(builddir);
 
     for (i = 0; i < (int)(sizeof modules / sizeof modules[0]); i++) {
         char path[512];
@@ -107,7 +113,8 @@ int main(int argc, char **argv)
                                       boot_suite, kmem_suite,
                                       task_suite, kirq_suite,
                                       kinput_suite, kdisplay_suite,
-                                      kbitmap_suite };
+                                      kbitmap_suite, kblk_suite,
+                                      kvfs_suite };
         rc = run_suites(suites, sizeof suites / sizeof suites[0], filter);
     }
 

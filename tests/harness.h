@@ -152,6 +152,12 @@ h_result h_call(uint32_t pc);
  * guest memory for the result rather than the status. */
 h_result h_run(uint32_t pc);
 
+/* The base of `size` bytes of fast RAM that are clear of the kernel image
+ * loaded at $200000 - its .bss included - and of the harness's own scratch
+ * area and stacks. Where a test puts a heap for the kernel's allocator.
+ * Never a constant: the kernel grows. A harness error if it does not fit. */
+uint32_t h_kernel_heap(uint32_t size);
+
 /* Carry on from wherever the last h_run stopped, for another cycle budget.
  * For code that never returns and is observed in slices - a scheduler. */
 h_result h_resume(void);
@@ -389,6 +395,15 @@ int      h_zorro_shut_up(void);
 /* Returns 0 on success. Attaching replaces any previous image. Note h_reset()
  * detaches, so attach inside the test, after reset. */
 int      h_attach_disk(const char *path);
+
+/* READ SECTORS, WRITE SECTORS, IDENTIFY DEVICE and FLUSH CACHE are modelled.
+ * Writes go to the in-memory copy of the image, never to the file, so a
+ * test cannot damage the image the next one reads. These count what the
+ * guest has asked of the drive since the image was attached - the only way
+ * to see a cache working is to see the commands it did not send. */
+unsigned h_disk_commands(void);
+unsigned h_disk_sectors_read(void);
+unsigned h_disk_sectors_written(void);
 void     h_detach_disk(void);
 uint32_t h_disk_sectors(void);
 

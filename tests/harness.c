@@ -693,7 +693,10 @@ uint16_t h_get_sr(void) { return (uint16_t)m68k_get_reg(NULL, M68K_REG_SR); }
 #define ATA_DRQ      0x08
 #define ATA_DRDY     0x40
 #define ATA_BSY      0x80
-#define ATA_CMD_READ 0x20
+#define ATA_CMD_READ     0x20
+#define ATA_CMD_WRITE    0x30
+#define ATA_CMD_FLUSH    0xE7
+#define ATA_CMD_IDENTIFY 0xEC
 
 #define NO_DRIVE     0x7F             /* what an empty bus floats to */
 
@@ -710,6 +713,9 @@ static uint8_t   g_ata_buf[512];
 static int       g_ata_pos;
 static int       g_ata_drq;
 static int       g_ata_err;
+static int       g_ata_writing;     /* DRQ means "give me data", not "take it" */
+static int       g_ata_identify;    /* the buffer is IDENTIFY data, not a sector */
+static unsigned  g_ata_commands, g_ata_sectors_read, g_ata_sectors_written;
 
 int h_attach_disk(const char *path)
 {
@@ -753,6 +759,7 @@ void h_detach_disk(void)
     free(g_disk);
     g_disk = NULL;
     g_disk_sectors = 0;
+    g_ata_commands = g_ata_sectors_read = g_ata_sectors_written = 0;
     g_ata_drq = g_ata_err = g_ata_left = g_ata_pos = 0;
     g_ata_error = 0;
     memset(g_ata_lba, 0, sizeof g_ata_lba);
@@ -761,6 +768,10 @@ void h_detach_disk(void)
 }
 
 uint32_t h_disk_sectors(void) { return g_disk_sectors; }
+
+unsigned h_disk_commands(void)        { return g_ata_commands; }
+unsigned h_disk_sectors_read(void)    { return g_ata_sectors_read; }
+unsigned h_disk_sectors_written(void) { return g_ata_sectors_written; }
 
 int h_disk_read(uint32_t lba, void *buf512)
 {
@@ -790,7 +801,29 @@ static void ata_command(uint8_t cmd)
     g_ata_error = 0;
     g_ata_drq = 0;
 
-    if (cmd != ATA_CMD_READ) {
+    g_ata_writing = 0;
+    g_ata_identify = 0;
+    g_ata_commands++;
+
+    if (cmd == ATA_CMD_FLUSH)
+        return;                                   /* nothing is ever unflushed */
+    if (cmd == ATA_CMD_IDENTIFY) {
+        /* Words are little-endian, as ATA defines them, and only the ones
+         * a driver needs: 49 says LBA is supported, 60-61 are the sector
+         * count. */
+        memset(g_ata_buf, 0, sizeof g_ata_buf);
+        g_ata_buf[49 * 2 + 1] = 0x02;
+        g_ata_buf[60 * 2]     = (uint8_t)g_disk_sectors;
+        g_ata_buf[60 * 2 + 1] = (uint8_t)(g_disk_sectors >> 8);
+        g_ata_buf[61 * 2]     = (uint8_t)(g_disk_sectors >> 16);
+        g_ata_buf[61 * 2 + 1] = (uint8_t)(g_disk_sectors >> 24);
+        g_ata_identify = 1;
+        g_ata_left = 1;
+        g_ata_pos = 0;
+        g_ata_drq = 1;
+        return;
+    }
+    if (cmd != ATA_CMD_READ && cmd != ATA_CMD_WRITE) {
         g_ata_err = 1;
         g_ata_error = 0x04;                       /* ABRT */
         return;
@@ -808,6 +841,12 @@ static void ata_command(uint8_t cmd)
     }
     g_ata_next_lba = lba;
     g_ata_left = count;
+    if (cmd == ATA_CMD_WRITE) {
+        g_ata_writing = 1;
+        g_ata_pos = 0;
+        g_ata_drq = 1;                            /* ready for the first sector */
+        return;
+    }
     ata_load_next_sector();
 }
 
@@ -824,11 +863,21 @@ static uint32_t ide_read(uint32_t addr, int size)
             return 0;
         }
         /* High byte first, so a move.w into memory reproduces disk order. */
+        if (g_ata_writing) {
+            fault("IDE data read during a WRITE command (pc $%06X)",
+                  m68k_get_reg(NULL, M68K_REG_PPC));
+            return 0;
+        }
         v = ((uint32_t)g_ata_buf[g_ata_pos] << 8) | g_ata_buf[g_ata_pos + 1];
         g_ata_pos += 2;
         if (g_ata_pos >= 512) {
             g_ata_left--;
-            ata_load_next_sector();
+            if (g_ata_identify) {
+                g_ata_drq = 0;
+            } else {
+                g_ata_sectors_read++;
+                ata_load_next_sector();
+            }
         }
         return v;
     }
@@ -847,9 +896,30 @@ static uint32_t ide_read(uint32_t addr, int size)
 
 static void ide_write(uint32_t addr, int size, uint32_t val)
 {
-    (void)size;
     if (!g_disk)
         return;
+
+    if (addr == IDE_DATA && size == 2) {
+        if (!g_ata_drq || !g_ata_writing) {
+            fault("IDE data write with no WRITE command waiting (pc $%06X)",
+                  m68k_get_reg(NULL, M68K_REG_PPC));
+            return;
+        }
+        g_ata_buf[g_ata_pos]     = (uint8_t)(val >> 8);
+        g_ata_buf[g_ata_pos + 1] = (uint8_t)val;
+        g_ata_pos += 2;
+        if (g_ata_pos >= 512) {
+            memcpy(g_disk + (size_t)g_ata_next_lba * 512, g_ata_buf, 512);
+            g_ata_sectors_written++;
+            g_ata_next_lba++;
+            g_ata_pos = 0;
+            if (--g_ata_left <= 0) {
+                g_ata_drq = 0;
+                g_ata_writing = 0;
+            }
+        }
+        return;
+    }
 
     if      (addr == IDE_NSECTOR) g_ata_nsector = (uint8_t)val;
     else if (addr == IDE_SECTOR)  g_ata_lba[0]  = (uint8_t)val;
@@ -1268,6 +1338,30 @@ static const char *vector_name(int v)
     if (v >= 25 && v <= 31) return "AUTOVECTOR";
     if (v >= 32 && v <= 47) return "TRAP";
     return "UNKNOWN";
+}
+
+/*
+ * Where a test may put a heap for the kernel's allocator: the first 64KB
+ * boundary past the end of the kernel image, .bss included.
+ *
+ * This used to be a constant, $210000, in every kernel test. The kernel's
+ * .bss grew past it - the block cache alone is 128KB - and from then on
+ * every test heap lay on top of the kernel's own variables, and every test
+ * passed anyway, until a change in code size moved things enough for one to
+ * crash. A test must not know where the kernel ends; it must ask.
+ */
+uint32_t h_kernel_heap(uint32_t size)
+{
+    uint32_t base = (h_sym("kernel:__end") + 0xFFFFu) & ~0xFFFFu;
+
+    if (base + size > H_SCRATCH_BASE) {
+        fprintf(stderr,
+            "harness: no room for a %u byte test heap: the kernel ends at $%06X\n"
+            "         and scratch memory starts at $%06X. Make the machine bigger.\n",
+            size, h_sym("kernel:__end"), H_SCRATCH_BASE);
+        exit(2);
+    }
+    return base;
 }
 
 uint32_t h_get_pc(void) { return m68k_get_reg(NULL, M68K_REG_PC); }
