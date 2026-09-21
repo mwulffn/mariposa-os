@@ -1,9 +1,11 @@
 # Driver Architecture
 
-> **Status.** The interrupt layer (`irq_attach`, per-level dispatch) is
-> implemented and pinned by `kirq.*`. Device classes and the registry are
-> designed here and not yet built; serial receive will be the first driver
-> written to the pattern. The GUI / blitter layer is deliberately open.
+> **Status.** Implemented so far: the interrupt layer (`irq.c`, pinned by
+> `kirq.*`), the device registry (`dev.c`), the `chardev` class, and serial
+> as its first instance, `ser0` - transmit and receive, the first driver
+> written to the pattern below - with a console task on top
+> (`console.c`). `blkdev` exists only in the ROM's boot path, `inputdev` not
+> at all. The GUI / blitter layer is deliberately open.
 
 ## The budget
 

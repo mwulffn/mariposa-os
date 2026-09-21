@@ -124,6 +124,7 @@ void irq_init(void)
 
     irq_attach(IRQ_VERTB, tick_isr, 0);
     irq_attach(IRQ_TBE, ser_tbe_isr, 0);
+    irq_attach(IRQ_RBF, ser_rbf_isr, 0);
 
     /* Open Paula's gate. Nothing arrives yet - SR still masks it - until
      * the caller runs cpu_int_enable(). */

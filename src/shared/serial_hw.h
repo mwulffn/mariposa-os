@@ -43,6 +43,10 @@ void serial_hw_tx(unsigned char c);
 /* Receive buffer full - a byte is waiting. */
 int serial_hw_rx_ready(void);
 
+/* A byte was lost: another arrived before the last was acknowledged. Ask
+ * BEFORE serial_hw_rx(), whose acknowledgement clears it. */
+int serial_hw_rx_overrun(void);
+
 /* Take the pending byte AND acknowledge it by clearing INTREQ's RBF bit.
  * Reading SERDATR does not clear RBF - Paula keeps reporting the same
  * character until software acknowledges, so a caller that skips this sees one

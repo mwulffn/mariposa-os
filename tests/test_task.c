@@ -379,6 +379,95 @@ static void kprintf_lines_stay_whole(int model, uint32_t cpu)
     CHECK(lines > 6, "only %d complete lines", lines);
 }
 
+/*
+ * What the whole stack was built for: a task blocked on input costs nothing
+ * until a byte arrives, and then runs at once. RBF interrupt -> ring ->
+ * wake_one -> isr_exit switches to the reader, ahead of the spinner it
+ * outranks.
+ */
+static void read_blocks_until_input(int model, uint32_t cpu)
+{
+    uint8_t zero[8] = {0};
+    uint32_t buf = h_alloc(zero, sizeof zero);
+    uint32_t rd, bg, before;
+
+    setup(model, cpu);
+    rd = block("kernel:_ser_read", buf, 1, NULL);       /* ser_read(buf, 1) */
+    bg = block(NULL, 0, 0, NULL);
+    spawn("reader", "body_caller2", rd, 2048, PRIO_HIGH);
+    spawn("bg", "body_spinner", bg, 1024, PRIO_NORMAL);
+
+    run(SLICE / 4);
+    CHECK_U32(0, count(rd));                            /* blocked... */
+    CHECK(count(bg) > 0, "a blocked reader held the CPU");
+
+    before = count(bg);
+    h_serial_rx_pacing(7400);
+    h_serial_input("xyz");
+    run(SLICE / 4);
+    CHECK_U32(3, count(rd));                            /* ...until now */
+    CHECK_U32('z', h_peek8(buf));
+    CHECK(count(bg) > before, "the reader did not go back to sleep");
+}
+
+/* The console: a task on ser0. Type a command, get an answer. */
+static void console_answers(int model, uint32_t cpu)
+{
+    setup(model, cpu);
+    kcall("kernel:_console_init", 0, NULL);
+    run(SLICE / 4);
+    CHECK_CONTAINS("amag> ", h_serial());
+
+    h_serial_clear();
+    h_serial_rx_pacing(7400);
+    h_serial_input("mem\r");
+    run(SLICE);
+    CHECK_CONTAINS("mem", h_serial());                  /* echoed */
+    CHECK_CONTAINS("fast", h_serial());
+    CHECK_CONTAINS("heap check: ok", h_serial());
+
+    h_serial_clear();
+    h_serial_input("ps\r");
+    run(SLICE);
+    CHECK_CONTAINS("console", h_serial());
+    CHECK_CONTAINS("idle", h_serial());
+
+    h_serial_clear();
+    h_serial_input("frobnicate\r");
+    run(SLICE);
+    CHECK_CONTAINS("unknown command", h_serial());
+    CHECK_CONTAINS("amag> ", h_serial());
+}
+
+static void console_enters_debugger(int model, uint32_t cpu)
+{
+    h_result r;
+
+    setup(model, cpu);
+    kcall("kernel:_console_init", 0, NULL);
+    run(SLICE / 4);
+    h_serial_clear();
+    h_serial_rx_pacing(7400);
+    h_serial_input("debug\r");
+    h_set_cycle_budget(SLICE * 2);
+    r = h_resume();
+    (void)r;
+    CHECK_CONTAINS("AMAG Debugger", h_serial());
+}
+
+/* Backspace edits the line; what reaches the command is what is left. */
+static void console_line_editing(int model, uint32_t cpu)
+{
+    setup(model, cpu);
+    kcall("kernel:_console_init", 0, NULL);
+    run(SLICE / 4);
+    h_serial_clear();
+    h_serial_rx_pacing(7400);
+    h_serial_input("mex\bm\r");                         /* "mex", oops, "mem" */
+    run(SLICE);
+    CHECK_CONTAINS("heap check: ok", h_serial());
+}
+
 /* No MMU, so nothing stops a task running off the end of its stack except
  * the kernel looking. It looks at every switch. */
 static void overflow_is_caught(int model, uint32_t cpu)
@@ -467,6 +556,10 @@ ON(exit_is_reaped)
 ON(wait_and_wake)
 ON(wake_all_wakes_all)
 ON(kprintf_lines_stay_whole)
+ON(read_blocks_until_input)
+ON(console_answers)
+ON(console_line_editing)
+ON(console_enters_debugger)
 ON(overflow_is_caught)
 ON(stack_high_water)
 ON(create_fails_cleanly)
@@ -493,6 +586,10 @@ static const test_case tests[] = {
     T("wait_and_wake",      wait_and_wake),
     T("wake_all",           wake_all_wakes_all),
     T("kprintf_lines_whole", kprintf_lines_stay_whole),
+    T("read_blocks_until_input", read_blocks_until_input),
+    T("console_answers",    console_answers),
+    T("console_line_editing", console_line_editing),
+    T("console_debug_cmd",  console_enters_debugger),
     T("overflow_is_caught", overflow_is_caught),
     T("stack_high_water",   stack_high_water),
     T("create_fails_cleanly", create_fails_cleanly),

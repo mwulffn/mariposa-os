@@ -22,6 +22,7 @@
 #define STATF_TSRE (SERDATF_TSRE >> 8)
 #define STATF_TBE  (SERDATF_TBE  >> 8)
 #define STATF_RBF  (SERDATF_RBF  >> 8)
+#define STATF_OVRUN (SERDATF_OVRUN >> 8)
 
 void serial_hw_init(unsigned short serper)
 {
@@ -47,6 +48,11 @@ void serial_hw_tx(unsigned char c)
 int serial_hw_rx_ready(void)
 {
     return (SERDATR_STATUS & STATF_RBF) != 0;
+}
+
+int serial_hw_rx_overrun(void)
+{
+    return (SERDATR_STATUS & STATF_OVRUN) != 0;
 }
 
 /*

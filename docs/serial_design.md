@@ -41,7 +41,8 @@ acknowledges. A receive path that skips it reads one keystroke for ever.
 
 ## Overview
 
-Kernel serial is transmit-only and has two modes behind one API.
+Kernel serial has two modes behind one API. Transmit first; receive has
+its own section below.
 
 - **Polled**, from `ser_init()` until `ser_irq_enable()`. Early boot runs with
   the CPU masked; output is on the wire when `ser_putc` returns, so an early
@@ -166,14 +167,44 @@ What is still lost: a crash that arrives by some other road - the ROM's
 autovector panic for an interrupt nobody installed, or a wild jump straight
 into the debugger.
 
-## No Receive
+## Receive
 
-The kernel does not receive serial data in normal operation. Serial receive
-is handled exclusively by the ROM debugger in crash mode. `ser_getc` exists
-and polls. An RBF-driven receive ring (level 5) is the obvious next step once
-something in the kernel wants input.
+The mirror image of transmit: the RBF interrupt (level 5) is the producer and
+tasks are the consumers.
+
+- **`ser_rbf_isr`** takes the byte, acknowledges RBF - reading SERDATR does
+  not - puts it in a 256-byte ring and calls `wake_one`.
+- **`ser_read(buf, len)`** blocks until at least one byte is available, then
+  returns as many as are waiting, up to `len`. The emptiness test and the
+  wait are inside one critical section, so a byte cannot arrive between them
+  and leave the reader asleep on a ring that is not empty; and the test is a
+  loop, because another reader may get there first. Task context only.
+
+Paula buffers exactly one received byte, so the handler has about a
+millisecond at 9600 baud. Any critical section longer than that, anywhere in
+the kernel, costs input. Two counters say when and why, because "input went
+missing" and "input was never sent" look the same from the far end of the
+cable:
+
+- `ser_rx_overruns` - Paula's buffer was overwritten before the handler ran
+  (SERDATR OVRUN). The handler was kept waiting.
+- `ser_rx_dropped` - the ring was full. Nobody was reading. The newest byte
+  is the one dropped, so what was typed first survives.
+
+The likeliest cause of overruns today is `kprintf` itself: one call is one
+critical section, and with the transmit ring full it polls at wire speed
+with interrupts masked. Typing at a console while the kernel is printing
+heavily will lose characters. The fix is the blocking transmit path listed
+in `docs/task_design.md`.
+
+After a crash the ROM debugger polls the same UART with interrupts masked,
+so the two never compete.
+
+The driver is registered as `ser0`, a `chardev` (`docs/driver_design.md`),
+and that is how the console task reaches it.
 
 ## Initialization
 
-`ser_init` sets SERPER for 9600 baud, empties the ring and selects polled
-mode. `irq_init` installs the level 1 vector and calls `ser_irq_enable` last.
+`ser_init` sets SERPER for 9600 baud, empties both rings, selects polled
+mode and registers `ser0`. `irq_init` attaches `ser_tbe_isr` and
+`ser_rbf_isr` and calls `ser_irq_enable` last, which enables both sources.

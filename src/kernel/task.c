@@ -30,6 +30,7 @@ static struct waitq ready[TASK_NPRIO];
 static struct task *current;
 static struct task *sleepers;
 static struct task *zombies;
+static struct task *all_tasks;
 static struct task  idle_task;
 static int          started;
 
@@ -80,6 +81,7 @@ void sched_init(unsigned long cpu)
     current = 0;
     sleepers = 0;
     zombies = 0;
+    all_tasks = 0;
     started = 0;
     need_resched = 0;
 }
@@ -134,10 +136,18 @@ static void reap(void)
     for (;;) {
         struct task *t;
 
+        struct task **link;
+
         CRITICAL_ENTER();
         t = zombies;
-        if (t)
+        if (t) {
             zombies = t->next;
+            for (link = &all_tasks; *link; link = &(*link)->all_next)
+                if (*link == t) {
+                    *link = t->all_next;
+                    break;
+                }
+        }
         CRITICAL_EXIT();
         if (!t)
             return;
@@ -193,9 +203,16 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg,
     t->name       = name;
 
     CRITICAL_ENTER();
+    t->all_next = all_tasks;
+    all_tasks = t;
     make_ready(t);
     CRITICAL_EXIT();
     return t;
+}
+
+struct task *task_next(const struct task *t)
+{
+    return t ? t->all_next : all_tasks;
 }
 
 unsigned long task_stack_unused(const struct task *t)
@@ -353,6 +370,8 @@ void sched_start(void)
     idle_task.quantum    = TASK_QUANTUM;
     idle_task.stack_base = 0;
     idle_task.fpu_state  = 0;
+    idle_task.all_next   = all_tasks;
+    all_tasks = &idle_task;
     current = &idle_task;
     started = 1;
     cpu_int_enable();

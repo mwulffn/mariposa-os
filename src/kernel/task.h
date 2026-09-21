@@ -35,6 +35,7 @@ struct task {
     unsigned long  stack_size;
     void          *fpu_state;   /* reserved: NULL until a task uses the FPU */
     const char    *name;
+    struct task   *all_next;    /* every task there is, for task_next() */
 };
 
 struct waitq {
@@ -57,6 +58,10 @@ void         task_exit(void);
 void         task_yield(void);
 void         task_sleep(unsigned long ticks);
 struct task *task_current(void);
+
+/* Walk every task, the idle task included: pass NULL for the first. Hold a
+ * critical section across the walk - tasks come and go. */
+struct task *task_next(const struct task *t);
 
 /* Bytes of stack the task has never touched. */
 unsigned long task_stack_unused(const struct task *t);

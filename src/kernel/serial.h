@@ -13,8 +13,10 @@
 #ifndef SERIAL_H
 #define SERIAL_H
 
-/* Ring size. A power of two, so wrap is a mask. About a second at 9600. */
-#define SER_RING_SIZE 1024
+/* Ring sizes. Powers of two, so wrap is a mask. Transmit holds about a
+ * second at 9600; receive holds more than anyone types ahead. */
+#define SER_RING_SIZE     1024
+#define SER_RX_RING_SIZE  256
 
 /*
  * Set the baud rate and start in polled mode.
@@ -58,13 +60,31 @@ unsigned long ser_tx_pending(void);
 void ser_tbe_isr(void *arg);
 
 /*
+ * Receive. Interrupt-driven once ser_irq_enable() has run: the RBF handler
+ * fills a ring and ser_read() empties it.
+ *
+ * ser_read blocks until at least one byte is available, then returns as
+ * many as are waiting, up to len. Task context only - it sleeps.
+ */
+long          ser_read(void *buf, unsigned long len);
+long          ser_write(const void *buf, unsigned long len);
+unsigned long ser_rx_ready(void);
+void          ser_rbf_isr(void *arg);
+
+/* Bytes lost, and why: the ring was full because nobody was reading, or
+ * Paula's one-byte buffer was overwritten because the handler was kept
+ * waiting - some critical section ran longer than a character time. */
+extern volatile unsigned long ser_rx_dropped;
+extern volatile unsigned long ser_rx_overruns;
+
+/*
  * Check if receive buffer has data.
  */
 int ser_can_read(void);
 
 /*
- * Read character. Blocks until data available. Receive is polled: in normal
- * operation the only reader of the serial line is the ROM debugger.
+ * Read character, polling. Only for before interrupts are up; after that
+ * the RBF handler takes every byte and this sees nothing. Use ser_read.
  */
 char ser_getc(void);
 

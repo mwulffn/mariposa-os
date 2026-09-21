@@ -112,7 +112,10 @@ src/kernel/
   libsup.s                    - 32-bit divide/modulo helpers vbcc calls
   kernel.c                    - Kernel entry point
   mem.c                       - Free-list allocator: chip best-fit, fast/slow first-fit
-  serial.c                    - Ring buffer + TBE interrupt; polled until irq_init
+  serial.c                    - ser0: TX and RX rings on the TBE/RBF interrupts; polled until irq_init
+  dev.{c,h} / chardev.h       - Device registry, and the character device class
+  console.{c,h}               - Command line task on ser0: help, mem, ps, dev, irq, debug
+  kstring.{c,h}               - String helpers
   kprintf.c                   - Kernel printf
   kernel.ld                   - Linker script, links at $200000
   build/SYSTEM.BIN            - Compiled kernel binary
@@ -146,7 +149,7 @@ test_*.py                     - FS-UAE integration scripts
 ## Testing
 
 ```bash
-make test                      # headless, 258 tests, ~0.3s, no emulator needed
+make test                      # headless, 272 tests, ~0.3s, no emulator needed
 make test FILTER=rom.panic     # narrow to one group while iterating
 ```
 
@@ -206,6 +209,18 @@ broke the whole harness at the symbol-table step.
 
 Decisions about architecture and design can be found int the 'docs' directory. Read them carefully when implementing new features.
 
+## Kernel console
+
+The kernel runs a command line on the serial port (`amag> `): `help`, `mem`,
+`ps`, `dev`, `irq`, and `debug`, which drops into the ROM debugger below.
+`./debug.py` talks to it the same way it talks to the debugger:
+
+```bash
+(sleep 7; printf 'mem\nps\n'; sleep 2; echo q) | ./debug.py 2>&1
+```
+
+The sleep is for the boot; nothing is listening before the prompt.
+
 ## Interactive Debugger
 
 The ROM boots directly into a small fast-ram based kernel
@@ -234,7 +249,7 @@ echo -e "r\nm fc0000\nq\n" | ./debug.py 2>&1    # Multiple commands
 > `m 200000 20` stores $20 at $200000. To dump, pass the address only; the
 > dump length is fixed at 16 bytes.
 
-Testing like this is only possible if kernel has crashed to debugger, or debugger has been invoked by the code. Invoking the debugger for testing is a good thing.
+Testing like this is only possible if kernel has crashed to debugger, or the debugger has been invoked - which the console's `debug` command now does from a healthy kernel. Invoking the debugger for testing is a good thing.
 
 
 ## Next Steps
@@ -286,8 +301,11 @@ instead, and `mem.stack_*` pins it.
   on every header now (vbcc has no -MD), so a changed struct in
   `src/shared` rebuilds both the ROM and the kernel.
 - Keyboard input (CIA-A), level 2 PORTS interrupt. Needs the handshake pulse.
-- Input, now that a task can block waiting for it: keyboard (below) or
-  serial receive, an RBF-driven ring at level 5, with a small console task.
+- Serial receive and a console task are in (`docs/serial_design.md`,
+  "Receive"). Known weakness: `kprintf` with a full transmit ring polls with
+  interrupts masked for longer than a character time, so heavy output loses
+  typed input. It is counted (`irq` on the console shows overruns); the fix
+  is the blocking transmit path.
 - A sleeping mutex, with its first user. Tasks sleeping on a full serial
   ring instead of polling. FPU context (the slot in `struct task` is
   reserved). All listed in `docs/task_design.md`.

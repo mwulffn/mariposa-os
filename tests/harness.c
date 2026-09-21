@@ -56,6 +56,7 @@ static size_t g_tx_len;
 static char   g_rx[4096];
 static size_t g_rx_len;
 static size_t g_rx_pos;
+static int    g_rx_ovrun;        /* SERDATR OVRUN; see receiver pacing below */
 
 /* --- transmitter timing --------------------------------------------------
  *
@@ -87,14 +88,45 @@ static uint16_t serdatr_value(void)
      * reading SERDATR - see the receive note in harness.h. */
     if ((g_intreq & H_INTF_RBF) && g_rx_pos < g_rx_len)
         v |= SERDATF_RBF | (uint8_t)g_rx[g_rx_pos];
+    if (g_rx_ovrun)
+        v |= 0x8000u;                       /* OVRUN, cleared with RBF */
     return v;
 }
+
+/* --- receiver pacing -----------------------------------------------------
+ *
+ * Unpaced (the default), the next byte latches the moment software
+ * acknowledges the last: a sender that waits for the receiver, which no
+ * real one does. Paced, a byte arrives every g_rx_pace cycles whether or
+ * not anyone is ready, and one that arrives while the last is still
+ * unacknowledged is lost and sets OVRUN - which is what a receive handler
+ * kept waiting by a long critical section actually faces. */
+static uint64_t g_rx_pace;
+static uint64_t g_rx_next_at;
+static size_t   g_rx_arrive;       /* paced: index of the next byte due */
 
 /* Paula latches the next byte as soon as software acknowledges the last. */
 static void serial_rx_latch(void)
 {
+    if (g_rx_pace)
+        return;
     if (!(g_intreq & H_INTF_RBF) && g_rx_pos < g_rx_len)
         g_intreq |= H_INTF_RBF;
+}
+
+static void serial_rx_tick(void)
+{
+    if (!g_rx_pace || g_rx_arrive >= g_rx_len || g_cycles < g_rx_next_at)
+        return;
+    g_rx_next_at += g_rx_pace;
+    if (g_intreq & H_INTF_RBF) {
+        g_rx_ovrun = 1;                     /* and this byte is gone */
+    } else {
+        g_rx_pos = g_rx_arrive;
+        g_intreq |= H_INTF_RBF;
+        irq_update();
+    }
+    g_rx_arrive++;
 }
 
 /* Called once per instruction: raise TBE when the buffer frees, so a ring
@@ -438,8 +470,11 @@ void h_write_intreq(uint16_t val)
     /* Clearing RBF is the acknowledgement that consumes the byte. Until it
      * happens SERDATR keeps reporting the same character, which is what
      * hardware does and what the old model papered over. */
-    if ((before & H_INTF_RBF) && !(g_intreq & H_INTF_RBF) && g_rx_pos < g_rx_len)
-        g_rx_pos++;
+    if ((before & H_INTF_RBF) && !(g_intreq & H_INTF_RBF)) {
+        g_rx_ovrun = 0;
+        if (!g_rx_pace && g_rx_pos < g_rx_len)
+            g_rx_pos++;
+    }
 
     serial_rx_latch();
     irq_update();
@@ -1083,6 +1118,7 @@ h_result h_run(uint32_t pc)
             r.cycles += n;
             g_cycles += n;
             serial_tx_tick();
+            serial_rx_tick();
             vbl_tick();
         }
     }
@@ -1115,13 +1151,20 @@ void h_serial_input(const char *s)
     memcpy(g_rx, s, n);
     g_rx_len = n;
     g_rx_pos = 0;
+    g_rx_arrive = 0;
+    g_rx_next_at = g_cycles + g_rx_pace;
     serial_rx_latch();
     irq_update();
 }
 
+void h_serial_rx_pacing(uint64_t cycles) { g_rx_pace = cycles; }
+
 void h_reset(void)
 {
     int v;
+
+    g_rx_pace = 0;
+    g_rx_ovrun = 0;
 
     memset(g_chip, 0, H_CHIP_SIZE);
     memset(g_fast, 0, H_FAST_SIZE);

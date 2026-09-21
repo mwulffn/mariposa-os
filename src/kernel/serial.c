@@ -26,6 +26,8 @@
 #include "amiga_hw.h"
 #include "cpu.h"
 #include "irq.h"
+#include "task.h"
+#include "chardev.h"
 
 #define RING_MASK (SER_RING_SIZE - 1)
 
@@ -58,19 +60,12 @@ static void tx_pump_wait(void)
     tx_pump();
 }
 
-void ser_init(void)
-{
-    /* The ROM has already done this; make the state explicit anyway. */
-    serial_hw_init(SERIAL_BAUD_9600);
-    head = tail = 0;
-    irq_mode = 0;
-}
-
 void ser_irq_enable(void)
 {
     CRITICAL_ENTER();
     irq_mode = 1;
     irq_enable(IRQ_TBE);
+    irq_enable(IRQ_RBF);
 
     /* Bytes may already be queued behind an interrupt that is not coming:
      * irq_init clears INTREQ wholesale, and so can anyone else. Raising TBE
@@ -149,6 +144,120 @@ unsigned long ser_tx_pending(void)
     return n;
 }
 
+/* ------------------------------------------------------------- receive --- */
+
+/*
+ * The mirror image of transmit: the RBF interrupt (level 5) is the producer
+ * and tasks are the consumers. Paula buffers exactly one received byte, so
+ * the handler's whole job is to get it out before the next one lands - at
+ * 9600 baud that is about a millisecond, and a critical section longer than
+ * that anywhere in the kernel costs input. When it happens it is counted,
+ * because "input went missing" and "input was never sent" are different
+ * bugs and look identical from the far end of the cable.
+ */
+#define RX_MASK (SER_RX_RING_SIZE - 1)
+
+static unsigned char rx_ring[SER_RX_RING_SIZE];
+static volatile unsigned short rx_head;     /* the handler's */
+static volatile unsigned short rx_tail;     /* the readers' */
+static struct waitq rx_wait;
+
+volatile unsigned long ser_rx_dropped;      /* ring full: nobody reading */
+volatile unsigned long ser_rx_overruns;     /* Paula's buffer overwritten */
+
+void ser_rbf_isr(void *arg)
+{
+    unsigned short next;
+    unsigned char c;
+
+    (void)arg;
+    if (serial_hw_rx_overrun())
+        ser_rx_overruns++;
+    c = serial_hw_rx();                     /* takes the byte and acks RBF */
+
+    next = (rx_head + 1) & RX_MASK;
+    if (next == rx_tail) {
+        /* Drop the newest: what was typed first is what survives. */
+        ser_rx_dropped++;
+        return;
+    }
+    rx_ring[rx_head] = c;
+    rx_head = next;
+    wake_one(&rx_wait);
+}
+
+unsigned long ser_rx_ready(void)
+{
+    unsigned long n;
+
+    CRITICAL_ENTER();
+    n = (unsigned long)((rx_head - rx_tail) & RX_MASK);
+    CRITICAL_EXIT();
+    return n;
+}
+
+long ser_read(void *buf, unsigned long len)
+{
+    unsigned char *out = buf;
+    long n = 0;
+
+    if (len == 0)
+        return 0;
+
+    CRITICAL_ENTER();
+    /* Masked from the emptiness test to the wait, so a byte cannot arrive
+     * in between and leave this task asleep on a ring that is not empty.
+     * A loop, not an if: another reader may have got there first. */
+    while (rx_head == rx_tail)
+        task_wait(&rx_wait);
+    while ((unsigned long)n < len && rx_head != rx_tail) {
+        out[n++] = rx_ring[rx_tail];
+        rx_tail = (rx_tail + 1) & RX_MASK;
+    }
+    CRITICAL_EXIT();
+    return n;
+}
+
+long ser_write(const void *buf, unsigned long len)
+{
+    const char *p = buf;
+    unsigned long i;
+
+    for (i = 0; i < len; i++)
+        ser_putc(p[i]);
+    return (long)len;
+}
+
+/* -------------------------------------------------------------- chardev --- */
+
+static long ser0_read(struct device *dev, void *buf, unsigned long len)
+{
+    (void)dev;
+    return ser_read(buf, len);
+}
+
+static long ser0_write(struct device *dev, const void *buf, unsigned long len)
+{
+    (void)dev;
+    return ser_write(buf, len);
+}
+
+static unsigned long ser0_rx_ready(struct device *dev)
+{
+    (void)dev;
+    return ser_rx_ready();
+}
+
+static const struct chardev_ops ser0_ops = {
+    ser0_read, ser0_write, ser0_rx_ready
+};
+
+static struct device ser0 = { "ser0", DEV_CHAR, &ser0_ops, 0, 0 };
+
+/* ----------------------------------------------------- polled receive --- */
+
+/* For before interrupts are up. Once they are, the RBF handler takes every
+ * byte and these two see nothing: use ser_read. */
 int ser_can_read(void)
 {
     return serial_hw_rx_ready();
@@ -159,4 +268,18 @@ char ser_getc(void)
     while (!serial_hw_rx_ready())
         ;
     return (char)serial_hw_rx();
+}
+
+/* ----------------------------------------------------------------- init --- */
+
+void ser_init(void)
+{
+    /* The ROM has already done this; make the state explicit anyway. */
+    serial_hw_init(SERIAL_BAUD_9600);
+    head = tail = 0;
+    rx_head = rx_tail = 0;
+    rx_wait.head = rx_wait.tail = 0;
+    ser_rx_dropped = ser_rx_overruns = 0;
+    irq_mode = 0;
+    dev_register(&ser0);        /* refused, harmlessly, on a second init */
 }

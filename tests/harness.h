@@ -199,6 +199,14 @@ void        h_serial_set_timing(uint64_t tbe_cycles, uint64_t tsre_cycles);
  */
 void h_serial_input(const char *s);
 
+/* How fast queued input arrives. 0, the default, is a sender that waits for
+ * the receiver: the next byte latches the moment the last is acknowledged.
+ * Non-zero is a real line: a byte every `cycles` cycles regardless, and one
+ * arriving while the last is still unacknowledged is lost and sets SERDATR's
+ * OVRUN bit until RBF is cleared. 9600 baud is about 7400. Call before
+ * h_serial_input. Reset by h_reset. */
+void h_serial_rx_pacing(uint64_t cycles);
+
 /* --- interrupts ----------------------------------------------------------
  *
  * Paula's interrupt registers and the 68000 IPL lines, modelled properly

@@ -353,6 +353,171 @@ static void t_crash_flushes_the_ring_first(void)
     CHECK_U32(0, h_serial_overruns());
 }
 
+/* --- receive --------------------------------------------------------------
+ *
+ * The RBF interrupt (level 5) moves each byte into a ring; ser_read takes
+ * them out. ser_read only blocks when the ring is empty, so with data
+ * waiting it can be called from out here, with no task behind it.
+ */
+static uint32_t kread(uint32_t buf, uint32_t len)
+{
+    h_result r;
+    h_begin_call();
+    h_push32(len);
+    h_push32(buf);
+    r = h_call(K("_ser_read"));
+    CHECK_CALL(r);
+    return h_get_d(0);
+}
+
+static uint32_t kget(const char *name)
+{
+    h_result r;
+    h_begin_call();
+    r = h_call(h_sym(name));
+    CHECK_CALL(r);
+    return h_get_d(0);
+}
+
+static void t_rx_interrupt_fills_the_ring(void)
+{
+    uint8_t zero[32] = {0};
+    uint32_t buf = h_alloc(zero, sizeof zero);
+    char got[32];
+
+    boot_to_irq_mode();
+    h_serial_input("hello, kernel");
+    h_set_sr(0x2000);
+    spin(1);
+
+    CHECK_U32(13, kget("kernel:_ser_rx_ready"));
+    CHECK_U32(5, kread(buf, 5));                /* as much as asked for */
+    CHECK_U32(8, kread(buf + 5, 20));           /* then as much as there is */
+    h_peekstr(buf, got, sizeof got);
+    CHECK_STR("hello, kernel", got);
+    CHECK_U32(0, kget("kernel:_ser_rx_ready"));
+    CHECK_U32(0, h_irq_level());                /* every byte acknowledged */
+}
+
+/* Nobody reading. The ring fills, and what cannot fit is dropped and
+ * counted - the newest, so what was typed first is what survives. */
+static void t_rx_ring_full_drops_newest(void)
+{
+    static char in[401];
+    uint8_t zero[8] = {0};
+    uint32_t buf = h_alloc(zero, sizeof zero);
+    uint32_t held, dropped;
+    int i;
+
+    for (i = 0; i < 400; i++) in[i] = (char)('A' + i % 26);
+    in[400] = 0;
+
+    boot_to_irq_mode();
+    h_serial_input(in);
+    h_set_sr(0x2000);
+    spin(2);
+
+    held    = kget("kernel:_ser_rx_ready");
+    dropped = h_peek32(K("_ser_rx_dropped"));
+    CHECK(held >= 200 && held < 400, "ring holds %u", held);
+    CHECK_U32(400, held + dropped);
+    kread(buf, 3);
+    CHECK_U32('A', h_peek8(buf));
+    CHECK_U32('C', h_peek8(buf + 2));
+}
+
+/*
+ * A real line does not wait. With the CPU masked for longer than a
+ * character time - a long critical section - Paula's one-byte buffer is
+ * overwritten before the handler runs. Nothing can recover the byte, but
+ * the driver can know, and "input went missing" is a different bug from
+ * "input was never sent".
+ */
+static void t_rx_hardware_overrun_is_counted(void)
+{
+    boot_to_irq_mode();
+    h_serial_rx_pacing(7400);                   /* 9600 baud */
+    h_serial_input("0123456789");
+
+    h_set_sr(0x2700);
+    spin(1);                                    /* ~650k cycles, deaf */
+    CHECK_U32(0, kget("kernel:_ser_rx_ready"));
+
+    h_set_sr(0x2000);
+    spin(1);
+    CHECK(h_peek32(K("_ser_rx_overruns")) >= 1, "overrun went unnoticed");
+    CHECK(kget("kernel:_ser_rx_ready") < 10, "lost bytes were invented");
+}
+
+/* At line speed with interrupts on, nothing is lost. */
+static void t_rx_keeps_up_at_9600(void)
+{
+    boot_to_irq_mode();
+    h_serial_rx_pacing(7400);
+    h_serial_input("the quick brown fox jumps over the lazy dog");
+    h_set_sr(0x2000);
+    spin(1);
+
+    CHECK_U32(43, kget("kernel:_ser_rx_ready"));
+    CHECK_U32(0, h_peek32(K("_ser_rx_overruns")));
+    CHECK_U32(0, h_peek32(K("_ser_rx_dropped")));
+}
+
+/* --- the device registry --------------------------------------------------
+ *
+ * Offsets spelled out: struct device { name, class, ops, hw, next } and
+ * struct chardev_ops { read, write, rx_ready }.
+ */
+static uint32_t kfind(const char *name)
+{
+    h_result r;
+    h_begin_call();
+    h_push32(h_str(name));
+    r = h_call(K("_dev_find"));
+    CHECK_CALL(r);
+    return h_get_d(0);
+}
+
+static void t_serial_is_a_chardev(void)
+{
+    uint32_t dev, ops;
+    h_result r;
+
+    boot_to_irq_mode();
+    dev = kfind("ser0");
+    CHECK(dev != 0, "ser0 is not registered");
+    CHECK_U32(0, kfind("ser1"));
+    CHECK_U32(0, kfind("ser"));                 /* a prefix is not a match... */
+    CHECK_U32(0, kfind("ser0x"));               /* ...in either direction */
+    if (!dev) return;
+    CHECK_U32(1, h_peek32(dev + 4));            /* DEV_CHAR */
+
+    /* write(dev, buf, len) through the ops table, as a client would. */
+    ops = h_peek32(dev + 8);
+    h_begin_call();
+    h_push32(7);
+    h_push32(h_str("via ops"));
+    h_push32(dev);
+    h_set_sr(0x2000);
+    r = h_call(h_peek32(ops + 4));
+    CHECK_CALL(r);
+    CHECK_U32(7, h_get_d(0));
+    kcall0("kernel:_ser_flush");
+    CHECK_STR("via ops", h_serial());
+}
+
+static void t_registering_twice_is_refused(void)
+{
+    h_result r;
+
+    boot_to_irq_mode();
+    h_begin_call();
+    h_push32(kfind("ser0"));
+    r = h_call(K("_dev_register"));
+    CHECK_CALL(r);
+    CHECK_U32(0xFFFFFFFFu, h_get_d(0));
+}
+
 /* ------------------------------------------------------------------------ */
 
 static const test_case tests[] = {
@@ -367,6 +532,12 @@ static const test_case tests[] = {
     { "enable_restarts_queue",  t_enable_restarts_a_stalled_queue,   NULL },
     { "isr_preserves_regs",     t_isr_preserves_registers,           NULL },
     { "crash_flushes_ring",     t_crash_flushes_the_ring_first,      NULL },
+    { "rx_fills_ring",          t_rx_interrupt_fills_the_ring,       NULL },
+    { "rx_full_drops_newest",   t_rx_ring_full_drops_newest,         NULL },
+    { "rx_overrun_counted",     t_rx_hardware_overrun_is_counted,    NULL },
+    { "rx_keeps_up_at_9600",    t_rx_keeps_up_at_9600,               NULL },
+    { "serial_is_a_chardev",    t_serial_is_a_chardev,               NULL },
+    { "register_twice_refused", t_registering_twice_is_refused,      NULL },
 };
 
 const test_suite kserial_suite = { "kser", tests, sizeof tests / sizeof tests[0] };
