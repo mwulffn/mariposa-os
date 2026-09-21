@@ -375,6 +375,181 @@ uint32_t h_zorro_base(void)     { return g_zorro_base_written; }
 int      h_zorro_configured(void) { return g_zorro_done && !g_zorro_shutup; }
 int      h_zorro_shut_up(void)  { return g_zorro_shutup; }
 
+/* ------------------------------------------------- CIA-A and the keyboard
+ *
+ * Enough 8520 to write a keyboard driver against: the interrupt control
+ * register, timer A, the serial data register and its direction bit. Not
+ * timer B, not the TOD clock, not the ports; and CIA-B is still a stub.
+ *
+ * ICR is the part worth getting right. Reading it returns the pending flags
+ * AND CLEARS THEM ALL - so whoever reads it on behalf of one device has just
+ * acknowledged every other device on the chip. The CIA's interrupt line
+ * feeds INTREQ PORTS, and it is a level: clearing PORTS in Paula while the
+ * CIA still has a flag set just sets it again.
+ *
+ * The keyboard sends a code into SDR and then waits to be told it arrived:
+ * the computer pulls KDAT low by switching the serial port to output, and
+ * must hold it for at least 85 microseconds before switching back. Real
+ * keyboards tolerate less; the specification does not, and code timed by a
+ * delay loop on a 7MHz 68000 is code that fails on a 68060. The model
+ * measures the pulse and counts the short ones.
+ *
+ * Timer A counts the E clock, which is the CPU clock divided by ten. */
+#define CIAA_BASE   0xBFE001u
+#define CIA_TALO    4
+#define CIA_TAHI    5
+#define CIA_SDR     12
+#define CIA_ICR     13
+#define CIA_CRA     14
+
+#define CIA_ICR_TA  0x01u
+#define CIA_ICR_SP  0x08u
+#define CRA_START   0x01u
+#define CRA_ONESHOT 0x08u
+#define CRA_LOAD    0x10u
+#define CRA_SPMODE  0x40u
+
+#define KBD_HANDSHAKE_MIN 603u      /* 85us of 7.09MHz */
+#define KBD_GAP           3000u     /* between a handshake and the next code */
+
+static uint8_t  g_cia_icr, g_cia_mask, g_cia_cra, g_cia_sdr;
+static uint16_t g_cia_ta, g_cia_ta_latch;
+static uint64_t g_cia_ta_frac;      /* CPU cycles not yet a whole E tick */
+static uint64_t g_cia_last;
+
+static uint8_t  g_kbd_q[256];
+static size_t   g_kbd_len, g_kbd_pos;
+static enum { KBD_IDLE, KBD_SENT, KBD_HANDSHAKING } g_kbd_state;
+static uint64_t g_kbd_at;           /* next send, or when the pulse began */
+static unsigned g_kbd_ok, g_kbd_short;
+
+static void irq_update(void);
+
+static int cia_irq(void) { return (g_cia_icr & g_cia_mask & 0x1Fu) != 0; }
+
+static void cia_raise(uint8_t flag)
+{
+    g_cia_icr |= flag;
+    if (cia_irq()) {
+        g_intreq |= H_INTF_PORTS;
+        irq_update();
+    }
+}
+
+static void cia_tick(void)
+{
+    uint64_t elapsed = g_cycles - g_cia_last;
+    g_cia_last = g_cycles;
+
+    if (g_cia_cra & CRA_START) {
+        uint64_t e;
+        g_cia_ta_frac += elapsed;
+        e = g_cia_ta_frac / 10;
+        g_cia_ta_frac %= 10;
+        if (e > g_cia_ta) {
+            g_cia_ta = g_cia_ta_latch;
+            if (g_cia_cra & CRA_ONESHOT)
+                g_cia_cra &= (uint8_t)~CRA_START;
+            cia_raise(CIA_ICR_TA);
+        } else {
+            g_cia_ta = (uint16_t)(g_cia_ta - e);
+        }
+    }
+
+    if (g_kbd_state == KBD_IDLE && g_kbd_pos < g_kbd_len && g_cycles >= g_kbd_at) {
+        uint8_t code = g_kbd_q[g_kbd_pos++];
+        /* On the wire: bits 6..0 then the up/down bit, all inverted. */
+        g_cia_sdr = (uint8_t)~((code << 1) | (code >> 7));
+        g_kbd_state = KBD_SENT;
+        cia_raise(CIA_ICR_SP);
+    }
+}
+
+static uint32_t cia_read(uint32_t addr)
+{
+    switch ((addr - CIAA_BASE) >> 8) {
+        case CIA_TALO: return g_cia_ta & 0xFF;
+        case CIA_TAHI: return g_cia_ta >> 8;
+        case CIA_SDR:  return g_cia_sdr;
+        case CIA_CRA:  return g_cia_cra;
+        case CIA_ICR: {
+            uint8_t v = (uint8_t)(g_cia_icr | (cia_irq() ? 0x80u : 0));
+            g_cia_icr = 0;                  /* all of them, whoever asked */
+            return v;
+        }
+        default: return 0;
+    }
+}
+
+static void cia_write(uint32_t addr, uint8_t val)
+{
+    switch ((addr - CIAA_BASE) >> 8) {
+        case CIA_TALO:
+            g_cia_ta_latch = (uint16_t)((g_cia_ta_latch & 0xFF00u) | val);
+            break;
+        case CIA_TAHI:
+            g_cia_ta_latch = (uint16_t)((g_cia_ta_latch & 0x00FFu) | (val << 8));
+            /* One-shot and stopped: writing the high byte loads and starts. */
+            if ((g_cia_cra & CRA_ONESHOT) && !(g_cia_cra & CRA_START)) {
+                g_cia_ta = g_cia_ta_latch;
+                g_cia_ta_frac = 0;
+                g_cia_cra |= CRA_START;
+            }
+            break;
+        case CIA_ICR:
+            if (val & 0x80u) g_cia_mask |= (uint8_t)(val & 0x1Fu);
+            else             g_cia_mask &= (uint8_t)~val;
+            if (cia_irq()) { g_intreq |= H_INTF_PORTS; irq_update(); }
+            break;
+        case CIA_CRA: {
+            uint8_t was = g_cia_cra;
+            if (val & CRA_LOAD) { g_cia_ta = g_cia_ta_latch; g_cia_ta_frac = 0; }
+            g_cia_cra = (uint8_t)(val & ~CRA_LOAD);
+
+            if (!(was & CRA_SPMODE) && (val & CRA_SPMODE) && g_kbd_state == KBD_SENT) {
+                g_kbd_state = KBD_HANDSHAKING;
+                g_kbd_at = g_cycles;
+            } else if ((was & CRA_SPMODE) && !(val & CRA_SPMODE) &&
+                       g_kbd_state == KBD_HANDSHAKING) {
+                if (g_cycles - g_kbd_at >= KBD_HANDSHAKE_MIN) g_kbd_ok++;
+                else                                          g_kbd_short++;
+                g_kbd_state = KBD_IDLE;
+                g_kbd_at = g_cycles + KBD_GAP;
+            }
+            break;
+        }
+        default: break;
+    }
+}
+
+void h_key(uint8_t code)
+{
+    if (g_kbd_len < sizeof g_kbd_q)
+        g_kbd_q[g_kbd_len++] = code;
+}
+
+unsigned h_kbd_handshakes(void)       { return g_kbd_ok; }
+unsigned h_kbd_short_handshakes(void) { return g_kbd_short; }
+int      h_kbd_idle(void)             { return g_kbd_state == KBD_IDLE && g_kbd_pos == g_kbd_len; }
+
+static void cia_reset(void)
+{
+    g_cia_icr = g_cia_mask = g_cia_cra = 0;
+    g_cia_sdr = 0xFF;
+    g_cia_ta = g_cia_ta_latch = 0xFFFF;
+    g_cia_ta_frac = 0;
+    g_cia_last = g_cycles;
+    g_kbd_len = g_kbd_pos = 0;
+    g_kbd_state = KBD_IDLE;
+    g_kbd_at = 0;
+    g_kbd_ok = g_kbd_short = 0;
+}
+
+static int is_ciaa(uint32_t addr)
+{
+    return addr >= CIAA_BASE && addr <= CIAA_BASE + 0xF00u && ((addr - CIAA_BASE) & 0xFF) == 0;
+}
+
 /* Regions we model well enough not to hang, but do not implement. Reads
  * return a value that means "nothing here"; writes are discarded. */
 static int stub_region(uint32_t addr, uint32_t *read_value)
@@ -475,6 +650,11 @@ void h_write_intreq(uint16_t val)
         if (!g_rx_pace && g_rx_pos < g_rx_len)
             g_rx_pos++;
     }
+
+    /* The CIA's interrupt line is a level: PORTS cannot be cleared from
+     * under a CIA that still has an enabled flag set. */
+    if (cia_irq())
+        g_intreq |= H_INTF_PORTS;
 
     serial_rx_latch();
     irq_update();
@@ -745,6 +925,8 @@ static uint32_t cpu_read(uint32_t addr, int size)
         return ide_read(addr, size);
     if (addr >= ZORRO_BASE && addr < ZORRO_END)
         return zorro_read(addr);
+    if (is_ciaa(addr))
+        return cia_read(addr);
     if (stub_region(addr, &stub))
         return stub;
     if (floating_bus(addr))
@@ -780,6 +962,10 @@ static void cpu_write(uint32_t addr, int size, uint32_t val)
     }
     if (addr >= ZORRO_BASE && addr < ZORRO_END) {
         zorro_write(addr, val);
+        return;
+    }
+    if (is_ciaa(addr)) {
+        cia_write(addr, (uint8_t)val);
         return;
     }
     if (stub_region(addr, &stub))
@@ -1120,6 +1306,7 @@ h_result h_run(uint32_t pc)
             serial_tx_tick();
             serial_rx_tick();
             vbl_tick();
+            cia_tick();
         }
     }
 
@@ -1165,6 +1352,7 @@ void h_reset(void)
 
     g_rx_pace = 0;
     g_rx_ovrun = 0;
+    cia_reset();
 
     memset(g_chip, 0, H_CHIP_SIZE);
     memset(g_fast, 0, H_FAST_SIZE);

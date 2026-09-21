@@ -80,6 +80,9 @@ static void setup(int model, uint32_t cpu_type)
     kcall("kernel:_ser_init", 0, NULL);
     kcall("kernel:_sched_init", 1, &cpu_type);
     kcall("kernel:_irq_init", 0, NULL);
+    kcall("kernel:_input_init", 0, NULL);
+    kcall("kernel:_cia_init", 0, NULL);
+    kcall("kernel:_kbd_init", 0, NULL);
     h_vbl_every(TICK);
 }
 
@@ -582,6 +585,45 @@ static void console_enters_debugger(int model, uint32_t cpu)
     CHECK_CONTAINS("AMAG Debugger", h_serial());
 }
 
+/* The console watching the keyboard: a task blocked on one device, fed by
+ * another, reporting on a third. */
+static void console_shows_keys(int model, uint32_t cpu)
+{
+    setup(model, cpu);
+    kcall("kernel:_console_init", 0, NULL);
+    run(SLICE / 4);
+    h_serial_rx_pacing(7400);
+
+    h_serial_clear();
+    h_serial_input("keymap dk\r");
+    run(SLICE);
+    CHECK_CONTAINS("keymap: dk", h_serial());
+
+    h_serial_clear();
+    h_serial_input("keymap klingon\r");
+    run(SLICE);
+    CHECK_CONTAINS("no keymap 'klingon'", h_serial());
+    CHECK_CONTAINS("keymap: dk", h_serial());
+
+    h_serial_clear();
+    h_serial_input("keys\r");
+    run(SLICE / 2);
+    h_key(0x20);                                        /* A down */
+    h_key(0x20 | 0x80);
+    h_key(0x50);                                        /* F1: no character */
+    run(SLICE);
+    CHECK_CONTAINS("code $20 down", h_serial());
+    CHECK_CONTAINS("'a'", h_serial());
+    CHECK_CONTAINS("code $20 up", h_serial());
+    CHECK_CONTAINS("code $50 down", h_serial());
+
+    h_serial_clear();
+    h_serial_input("x");                                /* any key: stop */
+    run(SLICE);
+    CHECK_CONTAINS("events dropped", h_serial());
+    CHECK_CONTAINS("amag> ", h_serial());
+}
+
 /* Backspace edits the line; what reaches the command is what is left. */
 static void console_line_editing(int model, uint32_t cpu)
 {
@@ -690,6 +732,7 @@ ON(masked_writer_never_sleeps)
 ON(flood_output_is_intact)
 ON(read_blocks_until_input)
 ON(console_answers)
+ON(console_shows_keys)
 ON(console_line_editing)
 ON(console_enters_debugger)
 ON(overflow_is_caught)
@@ -725,6 +768,7 @@ static const test_case tests[] = {
     T("flood_output_intact", flood_output_is_intact),
     T("read_blocks_until_input", read_blocks_until_input),
     T("console_answers",    console_answers),
+    T("console_shows_keys", console_shows_keys),
     T("console_line_editing", console_line_editing),
     T("console_debug_cmd",  console_enters_debugger),
     T("overflow_is_caught", overflow_is_caught),

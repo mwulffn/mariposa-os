@@ -41,7 +41,7 @@ LDLIBS         = -lm
 TEST_SRC = main.c protocol.c harness.c test_format.c test_memory.c test_zorro.c \
            test_vectors.c test_irq.c test_disk.c test_libsup.c test_cpu.c \
            test_kserial.c test_boot.c test_kmem.c test_task.c \
-           test_kirq.c
+           test_kirq.c test_kinput.c
 TEST_OBJ = $(TEST_SRC:%.c=$(BUILD)/%.o)
 
 MUSASHI_OBJ = $(BUILD)/m68kcpu.o $(BUILD)/m68kdasm.o $(BUILD)/m68kops.o \

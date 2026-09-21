@@ -10,6 +10,9 @@
 #include "stdarg.h"
 #include "task.h"
 #include "console.h"
+#include "input.h"
+#include "cia.h"
+#include "kbd.h"
 #include "vector.h"
 #include "irq.h"
 #include "cpu.h"
@@ -209,6 +212,13 @@ void kernel_main(struct bootinfo *bi)
     pr_info("CPU: 680%02lu%s\n", cpu_type == CPU_68000 ? 0UL : cpu_type * 10,
             BOOTINFO_HAS(bi, fpu_type) && bi->fpu_type ? " with FPU" : "");
     irq_init();
+
+    /* Input, bottom up: the event layer, the CIA that the keyboard hangs
+     * off, then the keyboard. All before interrupts are let in. */
+    input_init();
+    cia_init();
+    kbd_init();
+
     cpu_int_enable();
 
     if (console_init() != 0)

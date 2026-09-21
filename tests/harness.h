@@ -282,6 +282,26 @@ int h_irq_level(void);
  * and overridden by the next INTENA/INTREQ write. */
 void h_irq_force(int level);
 
+/* --- keyboard --------------------------------------------------------------
+ *
+ * A keyboard on CIA-A's serial port. h_key() queues a raw code - bit 7 set
+ * for key up - and the model sends it when the last one has been
+ * handshaken: SDR loaded in wire format (rotated and inverted), the SP flag
+ * raised in ICR, PORTS raised in Paula if the CIA's mask allows.
+ *
+ * The handshake is the computer pulling KDAT low (CRA SPMODE to output) for
+ * at least 85 microseconds. The model times the pulse: h_kbd_handshakes()
+ * counts good ones and h_kbd_short_handshakes() ones that were too brief,
+ * which is what a delay loop tuned on a slow CPU becomes on a fast one.
+ *
+ * ICR is modelled faithfully: reading it clears every flag on the chip,
+ * and PORTS cannot be cleared while the CIA still asserts. Timer A counts
+ * the E clock, one tick per ten CPU cycles. */
+void     h_key(uint8_t code);
+unsigned h_kbd_handshakes(void);
+unsigned h_kbd_short_handshakes(void);
+int      h_kbd_idle(void);              /* everything sent and handshaken */
+
 /* Raise VERTB every `cycles` CPU cycles, 0 to stop. Off after h_reset. The
  * period is not 50Hz and is not meant to be: a scheduler test wants many
  * ticks inside its cycle budget, landing wherever they land. */

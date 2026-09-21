@@ -4,8 +4,10 @@
 > `kirq.*`), the device registry (`dev.c`), the `chardev` class, and serial
 > as its first instance, `ser0` - transmit and receive, the first driver
 > written to the pattern below - with a console task on top
-> (`console.c`). `blkdev` exists only in the ROM's boot path, `inputdev` not
-> at all. The GUI / blitter layer is deliberately open.
+> (`console.c`). The keyboard is the second driver and the first on a shared
+> CIA - see `docs/input_design.md`; its events go through `input.c` and not
+> yet through a registered `inputdev`. `blkdev` exists only in the ROM's boot
+> path. The GUI / blitter layer is deliberately open.
 
 ## The budget
 

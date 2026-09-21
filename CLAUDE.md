@@ -114,8 +114,12 @@ src/kernel/
   mem.c                       - Free-list allocator: chip best-fit, fast/slow first-fit
   serial.c                    - ser0: TX and RX rings on the TBE/RBF interrupts; polled until irq_init
   dev.{c,h} / chardev.h       - Device registry, and the character device class
-  console.{c,h}               - Command line task on ser0: help, mem, ps, dev, irq, debug
+  console.{c,h}               - Command line task on ser0: help, mem, ps, dev, irq, keys, keymap, debug
   kstring.{c,h}               - String helpers
+  cia.{c,h}                   - Sole owner of CIA-A's ICR (reading it clears all five flags)
+  kbd.{c,h}                   - Keyboard protocol: raw key codes, CIA-timed handshake
+  input.{c,h}                 - Events: qualifiers, repeat, keymap translation, blocking read
+  keymap.{c,h}                - Layout tables (us, dk) and dead-key composition
   kprintf.c                   - Kernel printf
   kernel.ld                   - Linker script, links at $200000
   build/SYSTEM.BIN            - Compiled kernel binary
@@ -134,6 +138,7 @@ tests/                        - Headless 68000 test harness (see docs/testing.md
   test_boot.c                 - bootinfo layout, and entering the real kernel with it
   test_kmem.c                 - src/kernel/mem.c against hand-built memory maps
   test_kirq.c                 - irq_attach: shared levels, enable/disable, unhandled sources
+  test_kinput.c               - Keyboard: handshake on three cores, qualifiers, layouts, dead keys, repeat
   test_task.c                 - The scheduler, every test on a 68000 and a 68020 core
   guest/ktasks.s              - Bodies of the tasks the scheduler tests run
   test_disk.c                 - ata.c/ide.c, rdb.c, fat16.c, disk.c
@@ -149,7 +154,7 @@ test_*.py                     - FS-UAE integration scripts
 ## Testing
 
 ```bash
-make test                      # headless, 282 tests, ~0.3s, no emulator needed
+make test                      # headless, 301 tests, ~0.3s, no emulator needed
 make test FILTER=rom.panic     # narrow to one group while iterating
 ```
 
@@ -169,6 +174,7 @@ code is the verdict: 0 pass, 1 test failed, 2 harness error.
 | `boot.*` | CPU detection on five cores; `bootinfo.h` layout as an ABI; the real kernel entered with good, bad and short handoffs |
 | `kmem.*` | `src/kernel/mem.c`: fit policy, coalescing, bad frees, ownership, `mem_check`, random churn |
 | `kirq.*` | `irq.c`: several sources on one level, enabled-and-pending, unhandled sources shut off |
+| `kbd.*` | `cia.c`, `kbd.c`, `input.c`, `keymap.c` against a modelled CIA-A and keyboard |
 | `task.*` | `task.c` + `switch.s`: yield, preemption, priorities, sleep, wait queues, exit, stack overflow - each on two CPU cores |
 | `kser.*` | `src/kernel/serial.c` + `vectors.s`: ring buffer, TBE ISR, full ring, crash flush |
 | `disk.*` | `ata.c`, `ide.c`, `rdb.c`, `fat16.c` against a generated RDB + FAT16 image |
@@ -212,7 +218,8 @@ Decisions about architecture and design can be found int the 'docs' directory. R
 ## Kernel console
 
 The kernel runs a command line on the serial port (`amag> `): `help`, `mem`,
-`ps`, `dev`, `irq`, and `debug`, which drops into the ROM debugger below.
+`ps`, `dev`, `irq`, `keys` (watch keyboard events live), `keymap [us|dk]`,
+and `debug`, which drops into the ROM debugger below.
 `./debug.py` talks to it the same way it talks to the debugger:
 
 ```bash
@@ -300,7 +307,12 @@ instead, and `mem.stack_*` pins it.
   scripting rebuilds, `make -C src/kernel clean` first. C objects do depend
   on every header now (vbcc has no -MD), so a changed struct in
   `src/shared` rebuilds both the ROM and the kernel.
-- Keyboard input (CIA-A), level 2 PORTS interrupt. Needs the handshake pulse.
+- The keyboard is in (`docs/input_design.md`): raw codes from the driver,
+  events carrying code and character, US and Danish keymaps with dead keys.
+  Nothing consumes it yet but the console's `keys` command - it needs a
+  screen console, which needs the display decisions. Typed keys verified by
+  hand under FS-UAE; dead keys could not be reached through the emulator,
+  so they and the Danish table await a real DK Amiga keyboard.
 - Serial receive and a console task are in (`docs/serial_design.md`,
   "Receive"). A task that prints faster than 9600 baud sleeps on the
   transmit ring instead of polling it with interrupts masked, which used to

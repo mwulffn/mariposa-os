@@ -20,7 +20,8 @@ SYM     = $(BUILD)/kernel.sym
 
 # Sources
 ASRC    = crt0.s libsup.s cpu.s isr.s vectors.s switch.s
-CSRC    = kernel.c mem.c serial.c kprintf.c irq.c vector.c task.c dev.c console.c kstring.c
+CSRC    = kernel.c mem.c serial.c kprintf.c irq.c vector.c task.c dev.c console.c kstring.c \
+          cia.c kbd.c input.c keymap.c
 
 # Shared with the ROM: hardware definitions and the UART register
 # primitives. The waiting strategy is not shared - see serial_hw.h.
