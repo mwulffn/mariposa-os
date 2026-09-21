@@ -51,6 +51,18 @@ static int cached_write(const struct blkdev *dev, unsigned long lba,
     return bc_write((const struct blkdev *)dev->hw, lba, count, buf);
 }
 
+static int direct_read(const struct blkdev *dev, unsigned long lba,
+                       unsigned count, void *buf)
+{
+    return bc_read_direct((const struct blkdev *)dev->hw, lba, count, buf);
+}
+
+static int direct_write(const struct blkdev *dev, unsigned long lba,
+                        unsigned count, const void *buf)
+{
+    return bc_write_direct((const struct blkdev *)dev->hw, lba, count, buf);
+}
+
 static int cached_present(const struct blkdev *dev)
 {
     const struct blkdev *raw = dev->hw;
@@ -118,6 +130,8 @@ int vfs_mount(const char *volume, const char *devname, const char *fstype)
     m->cached.hw      = raw;
     m->cached.write   = raw->write ? cached_write : 0;
     m->cached.blocks  = raw->blocks;
+    m->cached.bulk_read  = direct_read;
+    m->cached.bulk_write = raw->write ? direct_write : 0;
 
     /* A named type is believed only if its own probe agrees: mounting the
      * wrong driver on a disk is how disks get eaten. */

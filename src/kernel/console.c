@@ -288,6 +288,85 @@ static void cmd_rm(struct device *con, const char *arg)
         say(con, "rm: %s\n", vfs_error(rc));
 }
 
+/*
+ * bench <volume:> - what DiskSpeed measures: a big file written and read
+ * back in big transfers, timed by the vertical blank. The file is removed
+ * afterwards. The buffer is allocated, so it is at an even address and the
+ * transfers take the direct path - which is the point.
+ */
+#define BENCH_CHUNK  32768UL
+#define BENCH_CHUNKS 32UL               /* 1MB */
+
+static unsigned long kb_per_second(unsigned long kb, unsigned long ticks)
+{
+    return ticks ? kb * 50 / ticks : 0;
+}
+
+static void cmd_bench(struct device *con, const char *arg)
+{
+    char path[48];
+    unsigned long i, n = 0, t0, write_ticks, read_ticks, bad = 0;
+    unsigned long *buf;
+    long rc = 0;
+    int h;
+
+    while (arg[n] && arg[n] != ' ' && n < sizeof path - 16) {
+        path[n] = arg[n];
+        n++;
+    }
+    if (!n || path[n - 1] != ':') {
+        say(con, "bench: which volume? bench boot:\n");
+        return;
+    }
+    for (i = 0; "bench.tmp"[i]; i++)
+        path[n++] = "bench.tmp"[i];
+    path[n] = '\0';
+
+    buf = mem_alloc(BENCH_CHUNK, ALLOC_ANY);
+    if (!buf) {
+        say(con, "bench: no memory\n");
+        return;
+    }
+    for (i = 0; i < BENCH_CHUNK / 4; i++)
+        buf[i] = i * 2654435761UL;
+
+    h = vfs_open_flags(path, VFS_O_WRITE | VFS_O_CREATE | VFS_O_TRUNC);
+    if (h < 0) {
+        say(con, "bench: %s\n", vfs_error(h));
+        mem_free(buf);
+        return;
+    }
+    say(con, "writing %luKB to %s...\n", BENCH_CHUNK * BENCH_CHUNKS / 1024, path);
+    t0 = sched_ticks();
+    for (i = 0; i < BENCH_CHUNKS && rc >= 0; i++)
+        rc = vfs_write(h, buf, BENCH_CHUNK);
+    vfs_close(h);                               /* the sync is part of the cost */
+    write_ticks = sched_ticks() - t0;
+    if (rc < 0) {
+        say(con, "bench: write: %s\n", vfs_error(rc));
+    } else {
+        h = vfs_open(path);
+        t0 = sched_ticks();
+        for (i = 0; i < BENCH_CHUNKS && h >= 0; i++) {
+            buf[0] = buf[1000] = 0;
+            rc = vfs_read(h, buf, BENCH_CHUNK);
+            if (rc != (long)BENCH_CHUNK || buf[0] != 0 || buf[1000] != 1000 * 2654435761UL)
+                bad++;
+        }
+        read_ticks = sched_ticks() - t0;
+        if (h >= 0)
+            vfs_close(h);
+
+        say(con, "write %4lu KB/s   (%lu ticks)\n",
+            kb_per_second(BENCH_CHUNK * BENCH_CHUNKS / 1024, write_ticks), write_ticks);
+        say(con, "read  %4lu KB/s   (%lu ticks)%s\n",
+            kb_per_second(BENCH_CHUNK * BENCH_CHUNKS / 1024, read_ticks), read_ticks,
+            bad ? "   DATA DID NOT READ BACK RIGHT" : "");
+    }
+    vfs_remove(path);
+    mem_free(buf);
+}
+
 static void cmd_bcache(struct device *con, const char *arg)
 {
     unsigned long total = bc_hits + bc_misses;
@@ -335,6 +414,7 @@ static const struct {
     { "write", cmd_write, "put a line of text in a file: write sys:note.txt hello" },
     { "mkdir", cmd_mkdir, "make a directory" },
     { "rm",   cmd_rm,   "remove a file or an empty directory" },
+    { "bench", cmd_bench, "disk speed, DiskSpeed style: bench boot:" },
     { "bcache", cmd_bcache, "block cache hits and misses" },
     { "keys", cmd_keys, "show keyboard events until a key is pressed here" },
     { "keymap", cmd_keymap, "show the keyboard layout, or set it: keymap dk" },

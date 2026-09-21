@@ -111,6 +111,8 @@ static void scan_partitions(const struct blkdev *disk)
         p->bd.hw      = p;
         p->bd.write   = disk->write ? part_write : 0;
         p->bd.blocks  = rp.sectors;
+        p->bd.bulk_read = 0;
+        p->bd.bulk_write = 0;
 
         p->dev.name  = p->name;
         p->dev.class = DEV_BLOCK;

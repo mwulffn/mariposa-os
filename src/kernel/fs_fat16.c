@@ -145,8 +145,46 @@ static long fat_read(void *fsdata, struct vfs_node *node, unsigned long offset,
             node->priv[N_INDEX]++;
         }
 
-        /* Sector by sector through the cluster: no buffer a cluster big. */
         in_cluster = want;
+
+        /* Whole sectors to an even address: straight into the caller's
+         * memory, around the cache, and across as many clusters as are
+         * adjacent on the disk - see blkdev.h for why. */
+        if (!(in_cluster & 511) && len - done >= FAT16_SECTOR_SIZE &&
+            !((unsigned long)(out + done) & 1)) {
+            unsigned long lba = f->fs.partition_lba + f->fs.data_start_sec +
+                                (node->priv[N_CUR] - 2) * f->fs.sec_per_clus +
+                                (in_cluster >> 9);
+            unsigned long sectors = f->fs.sec_per_clus - (in_cluster >> 9);
+            unsigned long want_sectors = (len - done) >> 9;
+            int (*rd)(const struct blkdev *, unsigned long, unsigned, void *) =
+                f->dev->bulk_read ? f->dev->bulk_read : f->dev->read;
+
+            /* Follow the chain while it stays adjacent. */
+            while (sectors < want_sectors && sectors < 256) {
+                long next = fat16_next_cluster(f->dev, &f->fs, node->priv[N_CUR], f->fat);
+
+                if (next != (long)node->priv[N_CUR] + 1)
+                    break;
+                node->priv[N_CUR] = (unsigned long)next;
+                node->priv[N_INDEX]++;
+                index++;
+                sectors += f->fs.sec_per_clus;
+            }
+            if (sectors > want_sectors) sectors = want_sectors;
+            if (sectors > 256) sectors = 256;
+            if (rd(f->dev, lba, (unsigned)sectors, out + done) != 0)
+                return VFS_EIO;
+            n = sectors << 9;
+            done += n;
+            /* Where that leaves us within the cluster we ended in. */
+            want = (in_cluster + n) % csize;
+            if (want == 0)
+                index++;                /* ended on a boundary: the next one */
+            continue;
+        }
+
+        /* Otherwise sector by sector through the bounce buffer. */
         {
             unsigned long sector = in_cluster >> 9, off = in_cluster & 511;
             unsigned long lba = f->fs.partition_lba + f->fs.data_start_sec +

@@ -59,7 +59,7 @@ static int ide_present(const struct blkdev *dev)
     return ata_present(&gayle);
 }
 
-static struct blkdev ide0 = { "ide0", ide_read, ide_present, &gayle, ide_write, 0 };
+static struct blkdev ide0 = { "ide0", ide_read, ide_present, &gayle, ide_write, 0, 0, 0 };
 
 struct blkdev *ide_init(void)
 {

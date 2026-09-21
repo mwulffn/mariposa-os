@@ -96,6 +96,7 @@ src/shared/                   - Compiled into BOTH the ROM and the kernel
   serial_hw.{c,h}             - Paula UART primitives; no waiting strategy
   ata.{c,h}                   - LBA28 PIO reads, writes, IDENTIFY; no register addresses
   ata_pio.s                   - The PIO data loops, in assembly: every disk byte goes through them
+  le.s                        - Little-endian field access by load-and-swap (even addresses only)
   ext2.{c,h}                  - Reading ext2: no allocation, no printing; the ROM boots with it
   rdb.{c,h}                   - Rigid Disk Block parsing; returns structs, prints nothing
   fat16.{c,h}                 - Read-only FAT16, incl. directory walking; returns structs, prints nothing
@@ -172,7 +173,7 @@ test_*.py                     - FS-UAE integration scripts
 ## Testing
 
 ```bash
-make test                      # headless, 385 tests, ~25s, no emulator needed
+make test                      # headless, 389 tests, ~25s, no emulator needed
 make test FILTER=rom.panic     # narrow to one group while iterating
 ```
 
@@ -252,7 +253,7 @@ screen waiting for the serial TCP connection. **Never use a bare
 
 The kernel runs a command line on the serial port and another on the
 keyboard and screen (`amag> `): `help`, `mem`,
-`ps`, `dev`, `irq`, `mount`, `ls`, `cat`, `write`, `mkdir`, `rm`, `bcache`, `keys` (watch keyboard
+`ps`, `dev`, `irq`, `mount`, `ls`, `cat`, `write`, `mkdir`, `rm`, `bench`, `bcache`, `keys` (watch keyboard
 events live), `keymap [us|dk]`,
 and `debug`, which drops into the ROM debugger below.
 `./debug.py` talks to it the same way it talks to the debugger:
@@ -369,10 +370,19 @@ instead, and `mem.stack_*` pins it.
   leading candidate), jump-table shared libraries, and how kernel calls are
   exposed to native code and to Wasm.
 - Storage is in (`docs/fs_design.md`): block devices and RDB partitions, a
-  block cache sized from free RAM, a VFS with Amiga-shaped names, FAT16
-  read-only, **ext2 read-write**, and a ROM that boots from either. Crash
-  safety is the order of writes, not a journal. ext2 reads at ~229KB/s and
-  writes at ~112KB/s on a 7MHz 68000, both held by tests. PFS3 later.
+  VFS with Amiga-shaped names, FAT16 read-only, **ext2 read-write**, and a
+  ROM that boots from either. Crash safety is the order of writes, not a
+  journal. PFS3 later.
+- **Storage assumes solid state** - every Amiga left boots from CF or an SSD.
+  No seek, so the ATA command is the unit of overhead and a cache hit is only
+  ~2.5x cheaper than the disk. Hence: metadata through the block cache, bulk
+  file data straight between disk and caller (`bulk_read`/`bulk_write`; no
+  MMU, so it is just a pointer), adjacent blocks in one command. ext2 does
+  ~713KB/s read and ~372KB/s write on a 7MHz 68000, held by tests and
+  confirmed within 7% by `bench` under FS-UAE. No like-for-like AmigaOS
+  number exists yet. ext2 is little-endian on a big-endian CPU: ~8% of a
+  write goes on byte-swapping, which FFS and PFS3 never pay. Directories are
+  linear: ~1.3M cycles to create a file among 120.
 - **Profile before optimising:** `H_PROFILE=f tests/build/run-tests ...` then
   `tools/profile.py f`. The ext2 write path was 10x slower than the disk and
   the code being tuned was 11% of it; the PIO loop and a block copy, both

@@ -60,12 +60,49 @@ size from the RDB and are unaffected. The harness models IDENTIFY and
 `kblk.disk_found_and_sized` passes against it, so this wants a real drive to
 say which of the two is telling the truth.
 
+### Solid state is the assumption
+
+Every Amiga still running boots from CompactFlash or an SSD. There is no
+seek. That changes what is worth doing: the unit of overhead is the ATA
+*command*, not the distance between blocks, and reading from "disk" is only
+about 2.5 times slower than copying from memory, because both are a 7MHz CPU
+moving words. Two decisions follow, and they are the same two AmigaOS's FFS
+made for other reasons - its `AddBuffers` cache held metadata, and
+`MaxTransfer`/`Mask` governed data going straight to the caller.
+
+**Metadata goes through the cache; bulk data goes round it.** Opening
+`sys:docs/deep/big.dat` reads three directories, four inodes and the group
+descriptors; reading it keeps returning to indirect blocks and writing it to
+bitmaps. Each is a separate command for a few hundred bytes, repeated on
+every operation - that is where a cache pays, and it needs tens of
+kilobytes. Bulk data is the opposite: caching it on the way past costs a
+copy and the bookkeeping, about as much as the transfer itself, to save 60%
+of a re-read that may never come. So whole blocks of file data go straight
+between the disk and the caller's memory - which, with no MMU, is just a
+pointer: there is no kernel/user boundary to copy across. `struct blkdev` has
+`bulk_read`/`bulk_write` for it. Partial blocks and small files still go
+through the cache, since they need a buffer in any case; that covers the
+commands, configuration and icons that are read again and again.
+
+**Adjacent blocks move in one command.** `ext2_read`, `fs_ext2`'s write and
+`fs_fat16`'s read each follow the block map while it stays contiguous and
+issue one transfer for the run - up to 256 sectors, an ATA command's limit.
+`mke2fs` lays files out in long runs, and this driver's allocator continues
+from where the last block came from, so its files are contiguous too. A
+512KB read went from 515 commands to 21.
+
+Coherence is two rules. The cache is write-through, so the disk is never
+behind it and a direct read needs nothing from it. A direct write drops any
+cached copy of the blocks it covers. `kext2.w_direct_cached_agree` mixes
+both paths over the same blocks; an odd buffer address, which word moves
+cannot use, takes the cached road instead (`kext2.w_odd_buffer_address`).
+
 ### The block cache
 
 Gayle's IDE is PIO with no DMA - every word of every sector goes through
-the CPU - so a block read twice is a cost paid twice. Commodore could not
-spend RAM on this. This machine can: fast RAM spent to save the slowest
-thing in it (`docs/driver_design.md`).
+the CPU - so a metadata block read twice is a command paid for twice.
+Commodore could not spend RAM on this. This machine can: fast RAM spent to
+save the slowest thing in it (`docs/driver_design.md`).
 
 - 512-byte blocks, keyed by (device, block).
 - **Sized from free memory, allocated at `bc_init`**: an eighth of what is
@@ -175,28 +212,84 @@ warning, not refused - the ordering above means it is leaky at worst.
 
 ### What it costs
 
-Measured in cycles per kilobyte, which at 7.09MHz is a transfer rate, and
-held by `kext2.read_throughput` and `kext2.w_throughput`:
+Measured in cycles per kilobyte, which at 7.09MHz is a transfer rate. The
+harness counts cycles; the console's `bench` command times a 1MB file against
+the vertical blank on a running machine. Under FS-UAE's cycle-exact 68000
+`bench` reports 673KB/s read and 345KB/s write, within 7% of what the
+harness predicted - so the harness's numbers can be believed.
 
-| | cycles/KB | KB/s |
-|---|---|---|
-| read, cold, 4KB calls | 30,900 | 229 |
-| write, 4KB calls | 63,000 | 112 |
-| write, as first written | 141,000 | 50 |
+| 512KB in 32KB calls | cycles/KB | KB/s | ATA commands |
+|---|---|---|---|
+| read, as first written | 30,400 | 232 | 515 |
+| read, now | 9,900 | 713 | 21 |
+| write, as first written | 45,000 | 157 | 563 |
+| write, now | 19,000 | 372 | 69 |
 
-The first version wrote a bitmap and an indirect block for every data block
-and copied every byte through a buffer - about 4KB of PIO per 1KB stored.
-What fixed it, in the order the profiler (`tools/profile.py`) pointed:
+The PIO loop alone is about 6,500 cycles a KB, roughly 1MB/s: reads are
+within 1.5x of what the hardware allows. The very first write path managed
+50KB/s. Bounds are held by `kext2.read_throughput`, `w_throughput` and
+`w_bulk_throughput`.
 
-- the PIO data loop and the cache's 512-byte copy in assembly
-  (`ata_pio.s`, `blkcopy.s`): vbcc's loops cost about 48 cycles a word and
-  5,000 cycles a block; these are about 15 and 1,500. Together they were 78%
-  of a write, and the filesystem logic everyone would have guessed at was 11%;
-- the bitmap and the current map blocks held in memory across a write call
-  and flushed before the inode - same order on disk, a fraction of the writes;
-- whole aligned blocks straight between the caller's buffer and the disk;
-- every `/` and `%` by a block size replaced by a shift or a mask, since a
-  68000 divides by calling a routine.
+**How this compares with AmigaOS is not known.** Figures people report for
+real machines - about 1.5MB/s on a 68000 A600 with a third-party driver,
+2.2-2.4MB/s on accelerated A1200s - are raw device reads from SysInfo and
+DriveSpeed, not file I/O through a filesystem, and none is a stock machine
+measured the way `bench` measures. The 1.5MB/s is above this driver's PIO
+ceiling, so that driver's inner loop is tighter than `ata_pio.s`. The
+comparison that would settle it is `bench` against DiskSpeed on the same
+real machine.
+
+What got it here, in the order the profiler (`tools/profile.py`) pointed -
+every one of which was somewhere other than where it was first looked for:
+
+- The PIO loop and the cache's 512-byte copy in assembly (`ata_pio.s`,
+  `blkcopy.s`). vbcc's loops cost about 48 cycles a word and 5,000 a block;
+  these are about 13 and 1,500. Together they were 78% of a write, and the
+  filesystem logic being tuned was 11%.
+- Bulk data round the cache, and adjacent blocks in one command: above.
+- Little-endian fields loaded whole and byte-swapped (`le.s`). Picking them
+  apart a byte at a time in C cost about 250 cycles a field, a dozen fields
+  per block allocated: 2.5M cycles of a 512KB write, more than the logic
+  around them. FAT's fields sit at odd offsets and cannot use it.
+- The allocator continues from where its last block came from instead of
+  scanning each bitmap from bit 0 - 13,000 cycles a block once a group was
+  mostly full - which is also what keeps files contiguous.
+- Bitmaps and map blocks held in memory across a write call and flushed
+  before the inode: the same order on disk, a fraction of the writes.
+- Every `/` and `%` by a block size replaced by a shift or a mask.
+
+### The price of the wrong byte order
+
+ext2 is little-endian and the 68000 is big-endian, so every field this driver
+reads or writes has to be turned round. **Amiga FFS never paid this, and
+neither do PFS3 or SFS**: they were written for this CPU and store their
+fields the way it reads them, where a field is one `move.l` of 12 to 16
+cycles. Here it is a call to `le32_get` - push, `jsr`, load, two rotates and a
+swap, `rts` - at around 130. On a bulk write the swap routines are 4% of all
+cycles by the profiler, and about as much again goes on calling them: call it
+8%, on the path where it matters least, since bulk data is never swapped -
+only the structures around it. On metadata-heavy work the share is higher.
+
+It was far worse before anyone looked: picking fields apart a byte at a time
+in C cost about 250 cycles each and showed up as the largest single item in
+a write. It could be made cheaper still by inlining the swap where vbcc
+allows, and it cannot be made free. It is a standing cost of choosing a
+filesystem for its tools instead of for its CPU, and a real point in PFS3's
+favour when that comparison is made.
+
+FAT is little-endian too, with the added insult that its boot sector has
+fields at odd offsets, which the 68000 cannot load as words at all -
+`fat16.c` still goes a byte at a time.
+
+### Known slow: directories are linear
+
+Creating a file in a directory of `n` entries scans all of them twice - once
+to be sure the name is free, ignoring case, and once to find room - and each
+step copies and compares a name. Creating 120 files in one directory costs
+about 1.3 million cycles a file, a fifth of a second each on a 7MHz machine.
+It is correct and it is what plain ext2 directories are; the fixes are a name
+cache in front of lookup, comparing without copying, and eventually htree.
+Not done.
 
 ### The judge is e2fsck
 

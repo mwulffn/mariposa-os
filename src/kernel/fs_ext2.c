@@ -44,6 +44,15 @@ struct ext2fs {
      * is what it was; there are just far fewer writes in it. */
     unsigned long  held[3];         /* [0] bbuf  [1] m1  [2] m2 */
     int            dirty[3];
+
+    /* Where the last block came from. The next search starts there: a file
+     * being written takes block after block from the same bitmap, and
+     * starting from bit 0 each time meant re-reading everything already
+     * taken - 13,000 cycles a block once a group was mostly full. It also
+     * keeps a growing file's blocks adjacent, which is what lets them be
+     * written in one command. */
+    unsigned long  rotor_map;       /* the bitmap block it applies to */
+    unsigned long  rotor_bit;
 };
 
 /* node.priv[0] is the inode number. */
@@ -264,10 +273,10 @@ static int ext2fs_readdir(void *fsdata, const struct vfs_node *dir,
 #define FT_REG       1
 #define FT_DIR       2
 
-static unsigned long g16(const unsigned char *p) { return (unsigned long)p[0] | ((unsigned long)p[1] << 8); }
-static unsigned long g32(const unsigned char *p) { return g16(p) | (g16(p + 2) << 16); }
-static void p16(unsigned char *p, unsigned long v) { p[0] = (unsigned char)v; p[1] = (unsigned char)(v >> 8); }
-static void p32(unsigned char *p, unsigned long v) { p16(p, v); p16(p + 2, v >> 16); }
+#define g16(p)    le16_get(p)
+#define g32(p)    le32_get(p)
+#define p16(p, v) le16_put((p), (v))
+#define p32(p, v) le32_put((p), (v))
 
 static int rd(struct ext2fs *e, unsigned long blk, unsigned char *buf)
 {
@@ -288,6 +297,20 @@ static int wr(struct ext2fs *e, unsigned long blk, const unsigned char *buf)
 /* Longwords where the alignment allows: these run once per block written,
  * and a byte loop is four times the instructions on a CPU with no cache to
  * hide it. Block buffers are always long aligned; callers' may not be. */
+/* File data, whole blocks, even address: around the cache if there is a
+ * way round. */
+static int wr_run(struct ext2fs *e, unsigned long blk, unsigned long blocks,
+                  const unsigned char *buf)
+{
+    const struct blkdev *dev = e->fs.dev;
+
+    if (blk == 0 || blk + blocks > e->fs.blocks_count)
+        return VFS_EIO;
+    return (dev->bulk_write ? dev->bulk_write : dev->write)
+               (dev, blk << e->fs.log_sectors,
+                (unsigned)(blocks << e->fs.log_sectors), buf) ? VFS_EIO : VFS_OK;
+}
+
 static void zero(unsigned char *buf, unsigned long n)
 {
     if (!((unsigned long)buf & 3))
@@ -375,6 +398,7 @@ static int writer_init(struct ext2fs *e)
     e->m1   = e->dbuf + bs;
     e->m2   = e->m1 + bs;
     e->iblk = 0;
+    e->rotor_map = e->rotor_bit = 0;
     e->meta_dirty = e->marked_dirty = 0;
     for (i = 0; i < 3; i++) {
         e->held[i] = 0;
@@ -448,23 +472,36 @@ static unsigned long blocks_in_group(struct ext2fs *e, unsigned long g)
     return left < e->fs.blocks_per_group ? left : e->fs.blocks_per_group;
 }
 
-/* The first clear bit below `limit`, set; or -1. */
-static long take_bit(unsigned char *map, unsigned long limit)
+/* The first clear bit in [from, to), set; or -1. */
+static long take_bit_in(unsigned char *map, unsigned long from, unsigned long to)
 {
-    unsigned long i;
+    unsigned long i = from;
 
-    for (i = 0; i < limit; i += 8) {
-        unsigned bit;
-
-        if (map[i >> 3] == 0xFF)
+    while (i < to) {
+        if (!(i & 7) && map[i >> 3] == 0xFF) {
+            i += 8;                     /* a full byte: skip it whole */
             continue;
-        for (bit = 0; bit < 8 && i + bit < limit; bit++)
-            if (!(map[i >> 3] & (1u << bit))) {
-                map[i >> 3] |= (unsigned char)(1u << bit);
-                return (long)(i + bit);
-            }
+        }
+        if (!(map[i >> 3] & (1u << (i & 7)))) {
+            map[i >> 3] |= (unsigned char)(1u << (i & 7));
+            return (long)i;
+        }
+        i++;
     }
     return -1;
+}
+
+/* A clear bit below `limit`, set: from `start` onwards for preference, then
+ * from the beginning. -1 if there is none. */
+static long take_bit(unsigned char *map, unsigned long limit, unsigned long start)
+{
+    long bit = -1;
+
+    if (start < limit)
+        bit = take_bit_in(map, start, limit);
+    if (bit < 0)
+        bit = take_bit_in(map, 0, start < limit ? start : limit);
+    return bit;
 }
 
 /* A free block, from `goal`'s group if it has one. 0 if the disk is full. */
@@ -472,8 +509,9 @@ static unsigned long alloc_block(struct ext2fs *e, unsigned long goal)
 {
     unsigned long n;
 
-    for (n = 0; n < e->fs.groups; n++) {
-        unsigned long g = (goal + n) % e->fs.groups;
+    unsigned long g = goal < e->fs.groups ? goal : 0;
+
+    for (n = 0; n < e->fs.groups; n++, g = (g + 1 == e->fs.groups) ? 0 : g + 1) {
         unsigned char *d = gd(e, g);
         long bit;
 
@@ -481,9 +519,12 @@ static unsigned long alloc_block(struct ext2fs *e, unsigned long goal)
             continue;
         if (wb_load(e, WB_BITMAP, g32(d + GD_BLOCK_BITMAP), 0) != VFS_OK)
             return 0;
-        bit = take_bit(e->bbuf, blocks_in_group(e, g));
+        bit = take_bit(e->bbuf, blocks_in_group(e, g),
+                       e->rotor_map == g32(d + GD_BLOCK_BITMAP) ? e->rotor_bit : 0);
         if (bit < 0)
             continue;                   /* the count lied; e2fsck will say so */
+        e->rotor_map = g32(d + GD_BLOCK_BITMAP);
+        e->rotor_bit = (unsigned long)bit + 1;
         e->dirty[WB_BITMAP] = 1;
         p16(d + GD_FREE_BLOCKS, g16(d + GD_FREE_BLOCKS) - 1);
         p32(e->sb + SB_FREE_BLOCKS, g32(e->sb + SB_FREE_BLOCKS) - 1);
@@ -527,7 +568,7 @@ static unsigned long alloc_inode(struct ext2fs *e, unsigned long goal, int is_di
             continue;
         if (wb_load(e, WB_BITMAP, g32(d + GD_INODE_BITMAP), 0) != VFS_OK)
             return 0;
-        bit = take_bit(e->bbuf, e->fs.inodes_per_group);
+        bit = take_bit(e->bbuf, e->fs.inodes_per_group, 0);
         if (bit < 0)
             continue;
         e->dirty[WB_BITMAP] = 1;
@@ -742,13 +783,30 @@ static long ext2fs_write(void *fsdata, struct vfs_node *node, unsigned long offs
         if (!blk)
             break;                      /* the disk is full */
 
-        if (run == bs && !((unsigned long)(in + done) & 1)) {
-            /* A whole block from an even address goes straight from the
-             * caller to the disk: no copy, and nothing to read first. */
-            if (wr(e, blk, in + done) != VFS_OK) {
+        if (off == 0 && len - done >= bs && !((unsigned long)(in + done) & 1)) {
+            /*
+             * Whole blocks from an even address go straight from the
+             * caller's memory to the disk, and as many at once as the
+             * allocator made adjacent - one command, no copies, nothing to
+             * read first. The blocks are allocated before any of them is
+             * written, and the inode still goes last.
+             */
+            unsigned long blocks = 1, want = (len - done) >> e->fs.log_block;
+            int f;
+
+            if (want > EXT2_MAX_RUN)
+                want = EXT2_MAX_RUN;
+            while (blocks < want &&
+                   bmap_w(e, raw, node->priv[0], n + blocks, 1, &f) == blk + blocks)
+                blocks++;
+            /* A block that was allocated and turned out not to be adjacent
+             * stays allocated and mapped: the next time round the loop picks
+             * it up as the start of the next run. */
+            if (wr_run(e, blk, blocks, in + done) != VFS_OK) {
                 rc = VFS_EIO;
                 break;
             }
+            run = blocks << e->fs.log_block;
         } else {
             /* Otherwise what is there has to survive around the edges -
              * unless the block is new, and there is nothing there. */

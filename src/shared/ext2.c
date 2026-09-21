@@ -39,15 +39,8 @@
 
 #define NOTHING             0xFFFFFFFFUL
 
-static unsigned long le16(const unsigned char *p)
-{
-    return (unsigned long)p[0] | ((unsigned long)p[1] << 8);
-}
-
-static unsigned long le32(const unsigned char *p)
-{
-    return le16(p) | (le16(p + 2) << 16);
-}
+#define le16(p) le16_get(p)
+#define le32(p) le32_get(p)
 
 void ext2_forget(struct ext2 *fs)
 {
@@ -229,16 +222,31 @@ long ext2_read(struct ext2 *fs, const struct ext2_inode *inode,
         if (blk == 0) {
             for (i = 0; i < run; i++)   /* a hole reads as zeros */
                 out[done + i] = 0;
-        } else if (run == fs->block_size && !((unsigned long)(out + done) & 1)) {
-            /* A whole block to an even address: straight from the disk to
-             * the caller. This is most of any large read - the ROM loading
-             * the kernel is nothing else - and the copy it saves costs more
-             * than the block did to fetch once it is in a cache. */
-            if ((unsigned long)blk >= fs->blocks_count)
+        } else if (off == 0 && len - done >= fs->block_size &&
+                   !((unsigned long)(out + done) & 1)) {
+            /*
+             * Whole blocks to an even address go straight from the disk into
+             * the caller's memory - and as many at once as are adjacent on
+             * the disk, in one command. On CompactFlash there is no seek, so
+             * the command is the unit of overhead, and mke2fs and this
+             * driver's allocator both lay files out in long runs. This is
+             * most of any large read; the ROM loading the kernel is nothing
+             * else.
+             */
+            unsigned long blocks = 1, want = (len - done) >> fs->log_block;
+            int (*rd)(const struct blkdev *, unsigned long, unsigned, void *) =
+                fs->dev->bulk_read ? fs->dev->bulk_read : fs->dev->read;
+
+            if (want > EXT2_MAX_RUN)
+                want = EXT2_MAX_RUN;
+            while (blocks < want && ext2_bmap(fs, inode, n + blocks) == blk + (long)blocks)
+                blocks++;
+            if ((unsigned long)blk + blocks > fs->blocks_count)
                 return EXT2_CORRUPT;
-            if (fs->dev->read(fs->dev, (unsigned long)blk << fs->log_sectors,
-                              (unsigned)fs->sectors_per_block, out + done) != 0)
+            if (rd(fs->dev, (unsigned long)blk << fs->log_sectors,
+                   (unsigned)(blocks << (fs->log_sectors)), out + done) != 0)
                 return EXT2_READ_ERROR;
+            run = blocks << fs->log_block;
         } else {
             int rc = ext2_load(fs, 0, (unsigned long)blk);
 

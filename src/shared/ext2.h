@@ -29,6 +29,8 @@
 #define EXT2_NAME_MAX       255
 #define EXT2_MAX_BLOCK      4096
 #define EXT2_NBLOCKS        15      /* 12 direct, then 1x, 2x, 3x indirect */
+#define EXT2_MAX_RUN        32      /* blocks in one transfer: 256 sectors, an
+                                     * ATA command's limit, at 4K a block */
 
 /* i_mode, the type bits */
 #define EXT2_S_IFMT   0xF000
@@ -116,6 +118,13 @@ int ext2_readdir(struct ext2 *fs, const struct ext2_inode *dir,
  * matches ignoring ASCII case. `scratch` is a dirent to work in. */
 int ext2_lookup(struct ext2 *fs, const struct ext2_inode *dir, const char *name,
                 int fold_case, struct ext2_dirent *scratch, unsigned long *ino);
+
+/* le.s: little-endian fields, loaded whole and byte-swapped. p must be even,
+ * which every ext2 field is. */
+unsigned long le16_get(const void *p);
+unsigned long le32_get(const void *p);
+void          le16_put(void *p, unsigned long v);
+void          le32_put(void *p, unsigned long v);
 
 /* For a writer sharing the buffers: block `blk` into buf[which], unless it
  * is already there. ext2_forget drops what a buffer claims to hold. */

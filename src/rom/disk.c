@@ -257,6 +257,8 @@ static long ext2_load_system_bin(unsigned long partition_lba, unsigned long *fil
     dev.hw      = &win;
     dev.write   = 0;
     dev.blocks  = 0;
+    dev.bulk_read  = 0;
+    dev.bulk_write = 0;
 
     rc = ext2_mount(&dev, fs, EXT2_WORK, EXT2_WORK_BYTES);
     if (rc == EXT2_NOT_EXT2)

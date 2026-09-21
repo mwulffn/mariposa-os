@@ -252,6 +252,37 @@ int bc_write(const struct blkdev *dev, unsigned long lba, unsigned long count, c
     return rc;
 }
 
+int bc_read_direct(const struct blkdev *dev, unsigned long lba, unsigned long count, void *buf)
+{
+    return blk_read(dev, lba, count, buf);
+}
+
+int bc_write_direct(const struct blkdev *dev, unsigned long lba, unsigned long count, const void *buf)
+{
+    unsigned long i;
+    int rc;
+
+    if (!bufs)
+        return blk_write(dev, lba, count, buf);
+
+    mutex_lock(&lock);
+    rc = blk_write(dev, lba, count, buf);
+    /* Whether it worked or not: what the cache holds for these blocks can
+     * no longer be vouched for. Nearly always nothing - bulk data does not
+     * enter the cache - so nearly always a run of hash misses. */
+    for (i = 0; i < count; i++) {
+        unsigned short n;
+
+        for (n = hash[bucket(dev, lba + i)]; n != NONE; n = bufs[n].hash_next)
+            if (bufs[n].dev == dev && bufs[n].lba == lba + i) {
+                discard(&bufs[n]);
+                break;
+            }
+    }
+    mutex_unlock(&lock);
+    return rc;
+}
+
 void bc_forget(const struct blkdev *dev)
 {
     int i;

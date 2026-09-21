@@ -32,6 +32,13 @@ extern unsigned long bc_blocks;     /* how many it got; 0 means off */
 int bc_read(const struct blkdev *dev, unsigned long lba, unsigned long count, void *buf);
 int bc_write(const struct blkdev *dev, unsigned long lba, unsigned long count, const void *buf);
 
+/* Bulk data, around the cache. A direct read needs nothing from the cache -
+ * it is write-through, so the disk is never behind it. A direct write has
+ * to drop any cached copy of the blocks it covers, or a later cached read
+ * would return what used to be there. */
+int bc_read_direct(const struct blkdev *dev, unsigned long lba, unsigned long count, void *buf);
+int bc_write_direct(const struct blkdev *dev, unsigned long lba, unsigned long count, const void *buf);
+
 /* Forget everything held for a device: it is going away, or something else
  * has written to it. */
 void bc_forget(const struct blkdev *dev);

@@ -31,7 +31,7 @@ SHARED_SRC = ../shared/serial_hw.c ../shared/ata.c ../shared/rdb.c \
              ../shared/fat16.c ../shared/ext2.c
 
 # Objects
-AOBJ    = $(ASRC:%.s=$(BUILD)/%.o) $(BUILD)/ata_pio.o
+AOBJ    = $(ASRC:%.s=$(BUILD)/%.o) $(BUILD)/ata_pio.o $(BUILD)/le.o
 COBJ    = $(CSRC:%.c=$(BUILD)/%.o)
 SOBJ    = $(addprefix $(BUILD)/,$(notdir $(SHARED_SRC:.c=.o)))
 CASM    = $(CSRC:%.c=$(BUILD)/%.asm)
@@ -55,6 +55,9 @@ $(BUILD)/%.o: %.s | $(BUILD)
 	$(VASM) $(VASMFLAGS) -o $@ $<
 
 $(BUILD)/ata_pio.o: ../shared/ata_pio.s | $(BUILD)
+	$(VASM) $(VASMFLAGS) -o $@ $<
+
+$(BUILD)/le.o: ../shared/le.s | $(BUILD)
 	$(VASM) $(VASMFLAGS) -o $@ $<
 
 # No per-file dependency tracking: vbcc has no -MD. Every C object depends

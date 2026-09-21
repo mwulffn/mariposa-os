@@ -296,20 +296,50 @@ static void t_empty_file_and_symlink(void)
     CHECK_U32((uint32_t)VFS_ENOENT, (uint32_t)vopen("sys:docs/nothere"));
 }
 
-static void t_second_read_is_free(void)
+/*
+ * What the cache is for, and what it is not. Metadata - the three
+ * directories and four inodes on the way to this file - is read over and
+ * over and costs a disk command each time, so the second time round it is
+ * free. Bulk data is not cached at all: on CompactFlash a hit saves only the
+ * difference between a PIO transfer and a copy, and caching it on the way
+ * past costs as much as fetching it. So the second read costs exactly the
+ * data, in one command, and nothing else.
+ */
+static void t_second_read_costs_only_the_data(void)
 {
     uint32_t buf = scratch(4096);
-    unsigned again;
+    unsigned sectors, commands, first;
     int32_t h;
 
     if (setup()) return;
+    first = h_disk_sectors_read();
     h = vopen("sys:docs/deep/big.dat");  vread(h, buf, 4096);  vclose(h);
+    first = h_disk_sectors_read() - first;
 
-    again = h_disk_sectors_read();
+    sectors = h_disk_sectors_read();  commands = h_disk_commands();
     h = vopen("sys:docs/deep/big.dat");
     CHECK_U32(4096, (uint32_t)vread(h, buf, 4096));
     vclose(h);
-    CHECK_U32(again, h_disk_sectors_read());
+
+    CHECK(first > 8 + 8, "the first read touched only %u sectors", first);
+    CHECK_U32(sectors + 8, h_disk_sectors_read());      /* 4096 bytes and no more */
+    CHECK_U32(commands + 1, h_disk_commands());         /* four adjacent blocks, once */
+}
+
+/* A small file does go through the cache: it is a partial block, which needs
+ * a buffer in any case. Commands, configuration, icons - read again and
+ * again, and the reason AmigaOS users kept things resident. */
+static void t_small_files_are_cached(void)
+{
+    char line[64];
+    unsigned sectors;
+
+    if (setup()) return;
+    first_line("sys:hello.txt", line, sizeof line);
+    sectors = h_disk_sectors_read();
+    first_line("sys:hello.txt", line, sizeof line);
+    CHECK_STR("hello from ext2\n", line);
+    CHECK_U32(sectors, h_disk_sectors_read());
 }
 
 /* === writing ================================================================
@@ -326,6 +356,12 @@ static void t_second_read_is_free(void)
 #define O_WRITE  1u
 #define O_CREATE 2u
 #define O_TRUNC  4u
+
+/* Bounds for t_bulk_throughput, in cycles per KB. Measured when written:
+ * read 9,900 (713KB/s), write 19,000 (372KB/s); before the direct path,
+ * 30,400 and 45,000. The PIO loop alone is about 6,500. */
+#define BULK_READ_MAX   13000u
+#define BULK_WRITE_MAX  25000u
 
 #include <stdlib.h>
 
@@ -464,7 +500,7 @@ static void t_write_throughput(void)
     /* Measured when this was written: 141,000 to begin with; 64,000 after
      * the PIO loop and the cache's block copy went to assembly and the
      * bitmap and map blocks stopped being written once per data block. */
-    CHECK(per_kb < 80000, "%llu cycles per KB written: %llu KB/s on a 7MHz 68000",
+    CHECK(per_kb < 50000, "%llu cycles per KB written: %llu KB/s on a 7MHz 68000",
           (unsigned long long)per_kb, (unsigned long long)(7090000 / per_kb));
     fsck_must_be_clean("after the throughput run");
 }
@@ -500,8 +536,150 @@ static void t_read_throughput(void)
     if (getenv("SHOW"))
         fprintf(stderr, "ext2 read: %llu cycles/KB = %llu KB/s at 7.09MHz\n",
                 (unsigned long long)per_kb, (unsigned long long)(7090000 / per_kb));
-    CHECK(per_kb < 40000, "%llu cycles per KB read: %llu KB/s on a 7MHz 68000",
+    CHECK(per_kb < 16000, "%llu cycles per KB read: %llu KB/s on a 7MHz 68000",
           (unsigned long long)per_kb, (unsigned long long)(7090000 / per_kb));
+}
+
+/*
+ * The DiskSpeed shape: a big file, written and then read back, in big
+ * transfers. This is what loading a program or copying a file looks like,
+ * and what the benchmarks people quote for real Amigas measure. 32KB calls,
+ * 512KB in all, and the ATA commands counted as well as the cycles - on a
+ * CF card there is no seek, so the command is the unit of overhead.
+ */
+#define BULK_CALL   32768u
+#define BULK_TOTAL  (16u * BULK_CALL)
+
+static uint64_t bulk_pass(int32_t h, const char *fn, uint32_t buf)
+{
+    uint64_t cycles = 0;
+    uint32_t i;
+
+    for (i = 0; i < BULK_TOTAL / BULK_CALL; i++) {
+        h_result r;
+        h_begin_call();
+        h_push32(BULK_CALL); h_push32(buf); h_push32((uint32_t)h);
+        h_set_cycle_budget(2000000000u);
+        r = h_call(h_sym(fn));
+        CHECK_CALL(r);
+        CHECK_U32(BULK_CALL, h_get_d(0));
+        cycles += r.cycles;
+    }
+    return cycles;
+}
+
+static void t_bulk_throughput(void)
+{
+    uint32_t buf, i;
+    uint64_t wr, rdc;
+    unsigned wcmds, rcmds;
+    int32_t h;
+
+    if (setup()) return;
+    { static uint8_t zero[BULK_CALL]; buf = h_alloc(zero, sizeof zero); }
+    for (i = 0; i < BULK_CALL; i += 4) h_poke32(buf + i, i * 2654435761u);
+
+    h = vopenf("sys:bench.dat", O_WRITE | O_CREATE);
+    if (h < 1) { t_fail("create: %d", (int)h); return; }
+    wcmds = h_disk_commands();
+    wr = bulk_pass(h, "kernel:_vfs_write", buf);
+    wcmds = h_disk_commands() - wcmds;
+    vclose(h);
+
+    /* Cold: a fresh mount, so nothing of the file is in any cache. */
+    { uint32_t vol = h_str("sys"); kcall("kernel:_vfs_unmount", 1, &vol); }
+    CHECK_U32(0, (uint32_t)mount("sys", "ide0p2", NULL));
+    h = vopen("sys:bench.dat");
+    rcmds = h_disk_commands();
+    rdc = bulk_pass(h, "kernel:_vfs_read", buf);
+    rcmds = h_disk_commands() - rcmds;
+    vclose(h);
+    for (i = 0; i < BULK_CALL; i += 4)
+        if (h_peek32(buf + i) != i * 2654435761u) { t_fail("read back wrong at %u", i); break; }
+
+    if (getenv("SHOW"))
+        fprintf(stderr,
+            "ext2 bulk: write %llu cycles/KB = %llu KB/s, %u commands;"
+            " read %llu cycles/KB = %llu KB/s, %u commands\n",
+            (unsigned long long)(wr / 512), (unsigned long long)(7090000 / (wr / 512)), wcmds,
+            (unsigned long long)(rdc / 512), (unsigned long long)(7090000 / (rdc / 512)), rcmds);
+    CHECK(rdc / 512 < BULK_READ_MAX, "bulk read: %llu cycles/KB, %llu KB/s",
+          (unsigned long long)(rdc / 512), (unsigned long long)(7090000 / (rdc / 512)));
+    CHECK(wr / 512 < BULK_WRITE_MAX, "bulk write: %llu cycles/KB, %llu KB/s",
+          (unsigned long long)(wr / 512), (unsigned long long)(7090000 / (wr / 512)));
+    fsck_must_be_clean("after the bulk benchmark");
+}
+
+/*
+ * Bulk data goes round the cache and small I/O goes through it, so the two
+ * must never disagree about a block. A direct write has to drop any cached
+ * copy; a cached write is write-through, so a direct read sees it.
+ */
+static void t_direct_and_cached_io_agree(void)
+{
+    uint32_t big = scratch(8192), small = scratch(16), i;
+    int32_t h;
+
+    if (setup()) return;
+    h = vopenf("sys:mixed.dat", O_WRITE | O_CREATE);
+    if (h < 1) { t_fail("create: %d", (int)h); return; }
+
+    for (i = 0; i < 8192; i++) h_poke8(big + i, 0x11);
+    CHECK_U32(8192, (uint32_t)vwrite(h, big, 8192));    /* direct: whole blocks */
+
+    vseek(h, 3000);                                     /* cached: inside block 2 */
+    for (i = 0; i < 10; i++) h_poke8(small + i, 0x22);
+    CHECK_U32(10, (uint32_t)vwrite(h, small, 10));
+    vseek(h, 3000);
+    CHECK_U32(10, (uint32_t)vread(h, small, 10));       /* block 2 is cached now */
+
+    vseek(h, 0);
+    for (i = 0; i < 8192; i++) h_poke8(big + i, 0x33);
+    CHECK_U32(8192, (uint32_t)vwrite(h, big, 8192));    /* direct, over the cached block */
+
+    vseek(h, 3000);
+    CHECK_U32(10, (uint32_t)vread(h, small, 10));       /* cached path again */
+    CHECK_U32(0x33, h_peek8(small));                    /* not the stale 0x22 */
+
+    vseek(h, 5000);
+    h_poke8(small, 0x44);
+    CHECK_U32(1, (uint32_t)vwrite(h, small, 1));        /* cached write... */
+    vseek(h, 0);
+    CHECK_U32(8192, (uint32_t)vread(h, big, 8192));     /* ...seen by a direct read */
+    CHECK_U32(0x44, h_peek8(big + 5000));
+    CHECK_U32(0x33, h_peek8(big + 4999));
+    CHECK_U32(0x33, h_peek8(big + 5001));
+    vclose(h);
+    fsck_must_be_clean("after mixing direct and cached I/O");
+}
+
+/* The direct path moves words, so it needs an even address. An odd one is
+ * unusual and legal, and must take the other road, not an address error. */
+static void t_odd_buffer_addresses(void)
+{
+    uint32_t buf = scratch(4200) + 1, i, bad = 0;
+    int32_t h;
+
+    if (setup()) return;
+    h = vopen("sys:docs/deep/big.dat");
+    if (h < 1) { t_fail("open: %d", (int)h); return; }
+    CHECK_U32(4096, (uint32_t)vread(h, buf, 4096));
+    for (i = 0; i < 4096; i++)
+        if (h_peek8(buf + i) != DISK2_EXT2_BYTE(i)) bad++;
+    CHECK(bad == 0, "%u bytes wrong reading to an odd address", bad);
+    vclose(h);
+
+    h = vopenf("sys:odd.dat", O_WRITE | O_CREATE);
+    for (i = 0; i < 4096; i++) h_poke8(buf + i, wbyte(i));
+    CHECK_U32(4096, (uint32_t)vwrite(h, buf, 4096));
+    vclose(h);
+    {
+        static uint8_t got[4200];
+        fsck_must_be_clean("after writing from an odd address");
+        CHECK_U32(4096, (uint32_t)host_cat("/odd.dat", got, sizeof got));
+        for (i = 0, bad = 0; i < 4096; i++) if (got[i] != wbyte(i)) bad++;
+        CHECK(bad == 0, "%u bytes wrong writing from an odd address", bad);
+    }
 }
 
 static void t_create_a_small_file(void)
@@ -762,9 +940,13 @@ static const test_case tests[] = {
     { "double_indirection",     t_big_file_through_double_indirection, NULL },
     { "seek_each_region",       t_seek_into_each_region,            NULL },
     { "empty_and_symlink",      t_empty_file_and_symlink,           NULL },
-    { "second_read_is_free",    t_second_read_is_free,              NULL },
+    { "second_read_only_data",  t_second_read_costs_only_the_data,  NULL },
+    { "small_files_cached",     t_small_files_are_cached,           NULL },
     { "read_throughput",        t_read_throughput,                  NULL },
     { "w_throughput",           t_write_throughput,                 NULL },
+    { "w_bulk_throughput",      t_bulk_throughput,                  NULL },
+    { "w_direct_cached_agree",  t_direct_and_cached_io_agree,       NULL },
+    { "w_odd_buffer_address",   t_odd_buffer_addresses,             NULL },
     { "w_create_small_file",    t_create_a_small_file,              NULL },
     { "w_double_indirection",   t_write_through_double_indirection, NULL },
     { "w_overwrite_in_place",   t_overwrite_in_place,               NULL },

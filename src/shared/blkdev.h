@@ -39,6 +39,27 @@ struct blkdev {
 
     /* How many blocks there are, or 0 if unknown. */
     unsigned long blocks;
+
+    /*
+     * For file DATA, as opposed to a filesystem's own structures: the same
+     * as read and write, but free to go around any cache. NULL means there
+     * is nothing to go around - use read and write.
+     *
+     * Every Amiga still running boots from CompactFlash or an SSD. There is
+     * no seek to save, so a cache hit on bulk data is worth only the
+     * difference between a PIO transfer and a memory copy - about 2.5x -
+     * while putting the data INTO a cache on the way past costs as much
+     * again as fetching it. Metadata is the opposite case: small, read over
+     * and over, and each time a whole disk command. So metadata goes
+     * through the cache and bulk data goes straight between the disk and
+     * the caller's memory, which with no MMU is simply a pointer.
+     *
+     * buf must be at an even address: the transfer is word moves.
+     */
+    int (*bulk_read)(const struct blkdev *dev, unsigned long lba,
+                     unsigned count, void *buf);
+    int (*bulk_write)(const struct blkdev *dev, unsigned long lba,
+                      unsigned count, const void *buf);
 };
 
 #endif /* BLKDEV_H */

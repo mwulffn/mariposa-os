@@ -40,7 +40,7 @@ SHARED_SRC = ../shared/serial_hw.c ../shared/ata.c \
 SOBJ = $(addprefix $(BUILD)/,$(notdir $(SHARED_SRC:.c=.o)))
 
 OBJ = $(BUILD)/bootstrap.o $(CSRC:%.c=$(BUILD)/%.o) $(SOBJ) $(BUILD)/libsup.o \
-      $(BUILD)/ata_pio.o
+      $(BUILD)/ata_pio.o $(BUILD)/le.o
 
 .PHONY: all clean
 
@@ -55,6 +55,9 @@ $(BUILD)/bootstrap.o: $(ASM_MAIN) $(ASM_INC) $(INCS) | $(BUILD)
 # The PIO data loops, in assembly because every byte on the disk goes through
 # them. Shared with the kernel, like the ATA code that calls them.
 $(BUILD)/ata_pio.o: ../shared/ata_pio.s | $(BUILD)
+	$(ASM) $(AFLAGS) -o $@ $<
+
+$(BUILD)/le.o: ../shared/le.s | $(BUILD)
 	$(ASM) $(AFLAGS) -o $@ $<
 
 $(BUILD)/libsup.o: $(LIBSUP_SRC) | $(BUILD)
