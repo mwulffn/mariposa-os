@@ -425,6 +425,29 @@ void *display_owner(void)
     return depth ? stack[depth - 1].owner : 0;
 }
 
+void display_owner_gone(void *owner)
+{
+    int i;
+
+    display_release(owner);             /* -1 if it held nothing: fine */
+
+    for (i = 0; i < MAX_BITMAPS; i++) {
+        bitmap_t bm = 0;
+
+        CRITICAL_ENTER();
+        if (bitmaps[i].used && bitmaps[i].owner == owner)
+            bm = ((bitmap_t)bitmaps[i].generation << 8) | (unsigned long)(i + 1);
+        CRITICAL_EXIT();
+        if (bm)
+            bitmap_free(bm);
+    }
+}
+
+static void task_gone(struct task *t)
+{
+    display_owner_gone(t);
+}
+
 void display_init(void)
 {
     int i;
@@ -443,4 +466,5 @@ void display_init(void)
 
     build(0);                                   /* a blank screen, to start */
     claim_hardware();
+    task_on_exit(task_gone);
 }

@@ -6,14 +6,14 @@
  * nothing until somebody types, and it talks to a chardev and not to
  * serial.c, so the same code will sit on a screen console when there is one.
  *
- * Command output goes through kprintf, so it appears on every console there
- * is - serial and screen - whichever one the command was typed at. The
- * prompt and the echo of the line being typed are private to a console; two
- * of them sharing a screen otherwise greet you with "amag> amag> ".
+ * Everything a console prints - prompt, echo, and what its commands answer -
+ * goes to its own device and nowhere else. kprintf is the kernel log and
+ * appears on every console; a command's answer is not the kernel log.
  */
 #include "console.h"
 #include "chardev.h"
 #include "kprintf.h"
+#include "stdarg.h"
 #include "task.h"
 #include "mem.h"
 #include "irq.h"
@@ -26,45 +26,73 @@
 #define LINE_MAX 80
 #define PROMPT   "amag> "
 
+/*
+ * Print to one console. Commands use this and never kprintf: kprintf is the
+ * kernel log and goes to every console there is, so an answer printed with
+ * it turned up on the screen after somebody else's waiting prompt when the
+ * question had been asked on the serial line. An answer belongs to whoever
+ * asked.
+ */
+static void say(struct device *con, const char *fmt, ...)
+{
+    char buf[160], *p, *start;
+    va_list ap;
+
+    va_start(ap, fmt);
+    kvsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+
+    /* \n becomes \r\n: a serial terminal needs both, the screen ignores
+     * the extra one. Written in runs, not a character at a time. */
+    for (start = p = buf; ; p++) {
+        if (*p == '\n' || *p == '\0') {
+            if (p > start)
+                chr_write(con, start, (unsigned long)(p - start));
+            if (*p == '\0')
+                break;
+            chr_write(con, "\r\n", 2);
+            start = p + 1;
+        }
+    }
+}
+
 /* ------------------------------------------------------------- commands --- */
 
 static void cmd_mem(struct device *con, const char *arg)
 {
-    (void)con;
     (void)arg;
     unsigned long rc;
 
-    pr_info("fast  %8lu free, largest %8lu\n",
+    say(con, "fast  %8lu free, largest %8lu\n",
             mem_avail(ALLOC_FAST), mem_largest(ALLOC_FAST));
-    pr_info("slow  %8lu free, largest %8lu\n",
+    say(con, "slow  %8lu free, largest %8lu\n",
             mem_avail(ALLOC_SLOW), mem_largest(ALLOC_SLOW));
-    pr_info("chip  %8lu free, largest %8lu\n",
+    say(con, "chip  %8lu free, largest %8lu\n",
             mem_avail(ALLOC_CHIP), mem_largest(ALLOC_CHIP));
     rc = mem_check();
     if (rc == MEMCHK_OK)
-        pr_info("heap check: ok\n");
+        say(con, "heap check: ok\n");
     else
-        pr_info("heap check: FAILED, code %lu\n", rc);
+        say(con, "heap check: FAILED, code %lu\n", rc);
 }
 
 static void cmd_ps(struct device *con, const char *arg)
 {
-    (void)con;
     (void)arg;
     static const char *const state[] = {
         "ready", "running", "sleeping", "waiting", "dead"
     };
     struct task *t;
 
-    pr_info("%-10s %4s  %-8s  %s\n", "task", "prio", "state", "stack unused");
+    say(con, "%-10s %4s  %-8s  %s\n", "task", "prio", "state", "stack unused");
     CRITICAL_ENTER();
     for (t = task_next(0); t; t = task_next(t)) {
         if (t->stack_base)
-            pr_info("%-10s %4u  %-8s  %lu of %lu\n", t->name,
+            say(con, "%-10s %4u  %-8s  %lu of %lu\n", t->name,
                     (unsigned)t->prio, state[t->state],
                     task_stack_unused(t), t->stack_size);
         else
-            pr_info("%-10s %4u  %-8s  (boot stack)\n", t->name,
+            say(con, "%-10s %4u  %-8s  (boot stack)\n", t->name,
                     (unsigned)t->prio, state[t->state]);
     }
     CRITICAL_EXIT();
@@ -72,22 +100,20 @@ static void cmd_ps(struct device *con, const char *arg)
 
 static void cmd_dev(struct device *con, const char *arg)
 {
-    (void)con;
     (void)arg;
     static const char *const class[] = { "?", "char", "block", "input" };
     struct device *d;
 
     for (d = dev_next(0); d; d = dev_next(d))
-        pr_info("%-8s %s\n", d->name, class[d->class <= DEV_INPUT ? d->class : 0]);
+        say(con, "%-8s %s\n", d->name, class[d->class <= DEV_INPUT ? d->class : 0]);
 }
 
 static void cmd_irq(struct device *con, const char *arg)
 {
-    (void)con;
     (void)arg;
-    pr_info("ticks %lu (%lu s), spurious interrupts %lu\n",
+    say(con, "ticks %lu (%lu s), spurious interrupts %lu\n",
             sched_ticks(), sched_ticks() / 50, irq_spurious);
-    pr_info("serial rx: %lu dropped (ring full), %lu overrun (handler late)\n",
+    say(con, "serial rx: %lu dropped (ring full), %lu overrun (handler late)\n",
             ser_rx_dropped, ser_rx_overruns);
 }
 
@@ -101,7 +127,7 @@ static void cmd_keys(struct device *con, const char *arg)
     char c;
 
     (void)arg;
-    pr_info("keymap %s - press keys on the Amiga; any key here to stop\n",
+    say(con, "keymap %s - press keys on the Amiga; any key here to stop\n",
             input_keymap_name());
     while (!chr_rx_ready(con)) {
         if (!input_pending()) {
@@ -110,22 +136,22 @@ static void cmd_keys(struct device *con, const char *arg)
         }
         input_read(&ev);
         if (ev.ch > ' ' && ev.ch < 0x7F)
-            pr_info("code $%02x %-6s qual $%04x  U+%04x '%c'\n", ev.code,
+            say(con, "code $%02x %-6s qual $%04x  U+%04x '%c'\n", ev.code,
                     what[ev.value], ev.qual, ev.ch, (int)ev.ch);
         else
-            pr_info("code $%02x %-6s qual $%04x  U+%04x\n", ev.code,
+            say(con, "code $%02x %-6s qual $%04x  U+%04x\n", ev.code,
                     what[ev.value], ev.qual, ev.ch);
     }
     chr_read(con, &c, 1);
-    pr_info("%lu events dropped, %lu protocol codes, %lu reset warnings\n",
+    say(con, "%lu events dropped, %lu protocol codes, %lu reset warnings\n",
             input_dropped, kbd_protocol_codes, kbd_reset_warnings);
 }
 
 static void cmd_keymap(struct device *con, const char *arg)
 {
     if (*arg && input_set_keymap(arg) != 0)
-        pr_info("no keymap '%s' - there is us and dk\n", arg);
-    pr_info("keymap: %s\n", input_keymap_name());
+        say(con, "no keymap '%s' - there is us and dk\n", arg);
+    say(con, "keymap: %s\n", input_keymap_name());
 }
 
 extern void (*rom_panic)(void);
@@ -134,9 +160,8 @@ extern void (*rom_panic)(void);
  * first, because the ROM bangs the UART and knows nothing of the ring. */
 static void cmd_debug(struct device *con, const char *arg)
 {
-    (void)con;
     (void)arg;
-    pr_info("entering the ROM debugger\n");
+    say(con, "entering the ROM debugger\n");
     ser_flush();
     cpu_int_disable();
     rom_panic();
@@ -163,12 +188,11 @@ static const struct {
 
 static void cmd_help(struct device *con, const char *arg)
 {
-    (void)con;
     (void)arg;
     unsigned int i;
 
     for (i = 0; i < NCOMMANDS; i++)
-        pr_info("%-7s %s\n", commands[i].name, commands[i].help);
+        say(con, "%-7s %s\n", commands[i].name, commands[i].help);
 }
 
 static void run_line(struct device *con, char *line)
@@ -190,7 +214,7 @@ static void run_line(struct device *con, char *line)
             commands[i].run(con, arg);
             return;
         }
-    pr_info("unknown command '%s' - try help\n", line);
+    say(con, "unknown command '%s' - try help\n", line);
 }
 
 /* ----------------------------------------------------------------- task --- */

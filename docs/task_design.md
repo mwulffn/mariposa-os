@@ -108,6 +108,13 @@ Reaping happens only when the machine goes idle or someone creates a task.
 A system that is never idle and never creates a task keeps its zombies;
 that is a known limit, not an oversight.
 
+**Exit hooks.** Memory is the reaper's business, but some things a task can
+die holding have to be given back at once - the display is the first.
+`task_on_exit(hook)` registers a function called for every exiting task, in
+that task's own context with interrupts on, before it is marked dead. It
+keeps `task.c` from having to know about every subsystem that hands
+something out.
+
 ### Stack overflow
 
 There is no MMU to catch it and this project has already had one silent

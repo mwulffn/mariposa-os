@@ -55,6 +55,12 @@ void sched_start(void);
 struct task *task_create(const char *name, void (*entry)(void *), void *arg,
                          unsigned long stack_size, int prio);
 void         task_exit(void);
+
+/* Call hook(task) whenever a task exits, in that task's own context, before
+ * it is marked dead. For subsystems that hand out things a task can die
+ * holding - the display is the first - so that task.c need not know about
+ * any of them. Registering the same hook twice is harmless. -1 if full. */
+int          task_on_exit(void (*hook)(struct task *t));
 void         task_yield(void);
 void         task_sleep(unsigned long ticks);
 struct task *task_current(void);

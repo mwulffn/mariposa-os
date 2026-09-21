@@ -648,7 +648,86 @@ static void t_type_a_command_see_the_answer(void)
 
     CHECK(row_starting("amag> mem") >= 0, "typed command not echoed on the screen");
     CHECK(row_starting("heap check: ok") >= 0, "the answer is not on the screen");
-    CHECK_CONTAINS("heap check: ok", h_serial());       /* and on serial too */
+    /* ...and only there: an answer belongs to the console that asked. */
+    kcall("kernel:_ser_flush", 0, NULL);
+    CHECK(strstr(h_serial(), "heap check") == NULL,
+          "a command typed at the keyboard answered on the serial line");
+}
+
+/*
+ * A task that exits holding the display must not keep it. Nothing else will
+ * ever release on its behalf, so without this a game that crashes out leaves
+ * a dead owner on top of the stack for ever and its bitmap slots taken.
+ * Given back at exit, not whenever the machine next goes idle.
+ */
+static void t_dead_owner_gives_the_display_back(void)
+{
+    uint8_t zero[0x80] = {0};
+    uint32_t blk, avail, a[5], chip_before;
+    h_result r;
+
+    console_setup();
+    CHECK_U32(0, kcall("kernel:_dcon_start", 0, NULL));
+    h_vbl_every(20011);
+
+    /* Chip RAM is sampled from inside: see task.exit_is_reaped. */
+    avail = h_alloc(zero, sizeof zero);
+    h_poke32(avail + 4, h_sym("kernel:_task_sleep"));  h_poke32(avail + 8, 10);
+    h_poke32(avail + 12, 1);                            /* ALLOC_CHIP */
+    h_poke32(avail + 16, h_sym("kernel:_mem_avail"));
+    a[0] = h_str("avail"); a[1] = h_sym("body_sampler"); a[2] = avail; a[3] = 1024; a[4] = 1;
+    kcall("kernel:_task_create", 5, a);
+    { uint32_t pool = 1; chip_before = kcall("kernel:_mem_avail", 1, &pool); }
+
+    blk = h_alloc(zero, sizeof zero);
+    h_poke32(blk + 4, h_sym("kernel:_task_current"));
+    h_poke32(blk + 16, h_sym("kernel:_bitmap_alloc"));
+    h_poke32(blk + 24, h_sym("kernel:_display_acquire"));
+    h_poke32(blk + 32, 0xFFFFFFFFu);
+    a[0] = h_str("grabber"); a[1] = h_sym("body_grab_display"); a[2] = blk; a[3] = 2048; a[4] = 2;
+    kcall("kernel:_task_create", 5, a);
+
+    h_set_sp(0x2E0000);
+    h_set_sr(0x2000);
+    h_set_cycle_budget(4000000);
+    r = h_run(h_sym("kernel:_sched_start"));
+    CHECK(r.status == H_TIMEOUT, "scheduler stopped: %s", r.detail);
+
+    CHECK_U32(1, h_peek32(blk));                        /* it ran, and is gone */
+    CHECK(h_peek32(blk + 28) != 0, "test setup: no bitmap was allocated");
+    CHECK_U32(0, h_peek32(blk + 32));                   /* and did take the display */
+
+    CHECK_U32(console_plane0, at_line(0).bpl1);         /* the console is back */
+    CHECK(h_peek32(avail) >= 2, "sampler ran %u times", h_peek32(avail));
+    CHECK_U32(chip_before, h_peek32(avail + 20));       /* and the bitmap is freed */
+}
+
+/* A kernel log line that arrives while someone is typing at the screen
+ * starts on a line of its own, and does not run on from their prompt. */
+static void t_log_does_not_run_on_from_a_prompt(void)
+{
+    uint32_t a[3];
+
+    console_setup();
+    a[0] = kcall("kernel:_dev_find", 1, (a[1] = h_str("con0"), &a[1]));
+    CHECK(a[0] != 0, "no con0");
+    {
+        /* what a console does: write a prompt through the device */
+        uint32_t dev = a[0], ops = h_peek32(dev + 8), w[3];
+        h_result r;
+        w[0] = dev; w[1] = h_str("amag> me"); w[2] = 8;
+        h_begin_call();
+        h_push32(w[2]); h_push32(w[1]); h_push32(w[0]);
+        r = h_call(h_peek32(ops + 4));
+        CHECK_CALL(r);
+    }
+    a[0] = 3; a[1] = h_str("disk0: media changed\n");
+    kcall("kernel:_kprintf", 2, a);
+    kcall("kernel:_dcon_render", 0, NULL);
+
+    CHECK(glyph_at(0, 0, 'a') && glyph_at(0, 7, 'e'), "the typed line was disturbed");
+    CHECK(glyph_at(0, 8, ' '), "log text ran on from the prompt");
+    CHECK(glyph_at(1, 0, 'd') && glyph_at(1, 4, '0'), "log line not on its own row");
 }
 
 /* ------------------------------------------------------------------------ */
@@ -672,6 +751,8 @@ static const test_case tests[] = {
     { "kprintf_on_screen",      t_kprintf_reaches_the_screen,       NULL },
     { "console_gives_way",      t_console_gives_way_and_returns,    NULL },
     { "type_command_see_answer", t_type_a_command_see_the_answer,   NULL },
+    { "dead_owner_gives_back",  t_dead_owner_gives_the_display_back, NULL },
+    { "log_starts_a_fresh_line", t_log_does_not_run_on_from_a_prompt, NULL },
 };
 
 const test_suite kdisplay_suite = { "kdisp", tests, sizeof tests / sizeof tests[0] };

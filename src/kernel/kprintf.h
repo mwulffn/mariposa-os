@@ -5,6 +5,8 @@
 #ifndef KPRINTF_H
 #define KPRINTF_H
 
+#include "stdarg.h"
+
 /* Log levels */
 #define KL_EMERG   0   /* System is unusable */
 #define KL_ERR     1   /* Error conditions */
@@ -43,5 +45,6 @@ int ksprintf(char *buf, const char *fmt, ...);
  * snprintf - format to buffer with size limit
  */
 int ksnprintf(char *buf, unsigned long size, const char *fmt, ...);
+int kvsnprintf(char *buf, unsigned long size, const char *fmt, va_list ap);
 
 #endif /* KPRINTF_H */

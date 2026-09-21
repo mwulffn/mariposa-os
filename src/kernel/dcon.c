@@ -34,6 +34,8 @@ static unsigned char dirty[DCON_ROWS];      /* by physical row */
 static int top;                             /* physical row of logical row 0 */
 static int cur_row, cur_col;                /* logical */
 static int program_stale;                   /* top moved: yoffset to update */
+static int typing;                          /* con0 wrote last, and left the
+                                             * cursor mid-line: a prompt */
 
 static bitmap_t screen;
 static struct bitmap_info bi;
@@ -227,6 +229,7 @@ static long con0_write(struct device *dev, const void *buf, unsigned long len)
 {
     (void)dev;
     dcon_write(buf, len, DCON_NORMAL);
+    typing = 1;
     return (long)len;
 }
 
@@ -241,8 +244,14 @@ static struct device con0 = { "con0", DEV_CHAR, &con0_ops, 0, 0 };
 
 /* ------------------------------------------------------------------- setup --- */
 
+/* The kernel log arrives whenever it likes, including while somebody is
+ * halfway through typing a command. It starts on a line of its own and does
+ * not run on from their prompt. */
 static void mirror(const char *buf, unsigned long len, int level)
 {
+    if (typing && cur_col != 0)
+        dcon_write("\n", 1, DCON_NORMAL);
+    typing = 0;
     dcon_write(buf, len, level <= KL_ERR ? DCON_BRIGHT : DCON_NORMAL);
 }
 

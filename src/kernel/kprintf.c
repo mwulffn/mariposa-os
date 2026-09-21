@@ -317,6 +317,22 @@ int ksprintf(char *buf, const char *fmt, ...)
     return ret;
 }
 
+int kvsnprintf(char *buf, unsigned long size, const char *fmt, va_list ap)
+{
+    struct output o;
+    int ret;
+
+    o.buf = buf;
+    o.serial = 0;
+    o.total = 0;
+    o.size = size;
+    o.pos = 0;
+    ret = do_format(&o, fmt, ap);
+    if (size)
+        buf[o.pos < size ? o.pos : size - 1] = '\0';
+    return ret;
+}
+
 int ksnprintf(char *buf, unsigned long size, const char *fmt, ...)
 {
     struct output o;

@@ -100,6 +100,13 @@ or `DMACON`; on release it reclaims them and reinstates the owner below. That
 is taking over the machine in a way the system can recover from, which the
 original could not offer.
 
+**An owner that dies gives everything back.** `display.c` registers a task
+exit hook (`task_on_exit`): when a task exits, the display is released if it
+held it and every bitmap it owned is freed - at exit, in the task's own
+context, not whenever the machine next goes idle. A game that crashes out
+returns the screen to whoever was underneath. `task.c` knows nothing about
+the display; it knows there are hooks.
+
 Acquiring is not negotiated: the current owner is told, not asked. A polite
 game asks the display server through the server's own interface first; the
 kernel does not take a position on manners.
@@ -131,8 +138,14 @@ the same calls any other owner would.
 - 640x256, two bitplanes, four colours. `kprintf` is mirrored to it, errors
   in the bright colour.
 - **`con0`** is a chardev that reads the keyboard and writes the screen, and
-  a second console task runs on it. Prompt and echo are private to each
-  console; command output goes to both, because `kprintf` does.
+  a second console task runs on it. Everything a console prints - prompt,
+  echo, and what its commands answer - goes to its own device and nowhere
+  else: `kprintf` is the kernel log and appears on every console, and a
+  command's answer is not the kernel log. The first version printed answers
+  with `kprintf`, and a command typed on the serial line answered on the
+  screen after somebody else's waiting prompt.
+- A kernel log line can still arrive while someone is typing at the screen.
+  It starts on a line of its own and does not run on from their prompt.
 
 **The font** is Topaz, from `assets/fonts/topaz-unicode-ks13.bdf` by way of
 `tools/mkfont.py`; see `assets/fonts/README.md` for where it came from and
@@ -140,12 +153,7 @@ what that means. Any 8-pixel-wide BDF works and changing font is one command.
 
 ## Open
 
-- **Nothing reclaims a dead owner.** A task that exits holding the display,
-  or bitmaps, keeps its stack entry and its bitmap slots (the memory itself
-  is freed by `mem_free_owner`). Reaping needs to call into here.
 - **PAL is assumed.** 256 lines; an NTSC machine has 200.
-- **Cosmetic:** output from a command typed on one console lands after the
-  other console's waiting prompt.
 - **Sprites**, for a pointer. **The blitter**: a queue of rectangle copies
   and fills with a completion, checked against bitmaps the caller owns.
 - **Userspace**: the loader, the library format, and how these calls are

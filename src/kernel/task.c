@@ -32,6 +32,9 @@ static struct task *sleepers;
 static struct task *zombies;
 static struct task *all_tasks;
 static struct task  idle_task;
+
+#define MAX_EXIT_HOOKS 4
+static void (*exit_hooks[MAX_EXIT_HOOKS])(struct task *);
 static int          started;
 
 /* --------------------------------------------------------------- queues --- */
@@ -352,8 +355,33 @@ void wake_all(struct waitq *q)
     resched_if_task_level();
 }
 
+int task_on_exit(void (*hook)(struct task *t))
+{
+    int i, rc = -1;
+
+    CRITICAL_ENTER();
+    for (i = 0; i < MAX_EXIT_HOOKS; i++)
+        if (exit_hooks[i] == hook || !exit_hooks[i]) {
+            exit_hooks[i] = hook;
+            rc = 0;
+            break;
+        }
+    CRITICAL_EXIT();
+    return rc;
+}
+
 void task_exit(void)
 {
+    int i;
+
+    /* While this is still a live task with interrupts on: a hook may need
+     * to do real work. Memory is not their business - the reaper frees
+     * whatever the task owned - but things like the display have to be
+     * given back now, not whenever the machine next goes idle. */
+    for (i = 0; i < MAX_EXIT_HOOKS; i++)
+        if (exit_hooks[i])
+            exit_hooks[i](current);
+
     cpu_int_disable();
     current->state = TASK_DEAD;
     current->next = zombies;

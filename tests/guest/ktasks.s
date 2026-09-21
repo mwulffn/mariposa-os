@@ -27,6 +27,7 @@
         xdef    body_waker
         xdef    body_sampler
         xdef    body_caller2
+        xdef    body_grab_display
         xdef    body_masked_caller2
         xdef    isr_count_ack
         xdef    notify_record
@@ -129,6 +130,33 @@ body_caller2:
 body_masked_caller2:
         move.w  #$2700,sr
         bra.s   body_caller2
+
+; A badly behaved display owner: allocate a bitmap, take the display, and
+; return without giving either back. Owner is the task itself, which is what
+; lets the kernel know whose they were.
+;    4 task_current   16 bitmap_alloc   24 display_acquire
+body_grab_display:
+        move.l  4(sp),a2
+        move.l  4(a2),a0
+        jsr     (a0)                    ; task_current()
+        move.l  d0,d2
+        move.l  d2,-(sp)                ; owner
+        pea     1                       ; depth
+        pea     64                      ; height
+        pea     320                     ; width
+        move.l  16(a2),a0
+        jsr     (a0)                    ; bitmap_alloc
+        lea     16(sp),sp
+        move.l  d0,28(a2)               ; the handle, for the test to see
+        clr.l   -(sp)                   ; no notify
+        clr.l   -(sp)                   ; no flags
+        move.l  d2,-(sp)                ; owner
+        move.l  24(a2),a0
+        jsr     (a0)                    ; display_acquire
+        lea     12(sp),sp
+        move.l  d0,32(a2)               ; its result
+        addq.l  #1,(a2)
+        rts
 
 ; Load every register with a value derived from param, then spin checking
 ; them. Preemption lands wherever it lands; if any register ever differs,

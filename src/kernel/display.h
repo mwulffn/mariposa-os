@@ -94,6 +94,11 @@ int  display_acquire(void *owner, unsigned long flags, display_notify_fn notify)
 int  display_release(void *owner);
 void *display_owner(void);
 
+/* owner is gone: release the display if it holds it and free every bitmap
+ * it owns. Called for every exiting task; harmless for one that owns
+ * nothing. */
+void display_owner_gone(void *owner);
+
 /* Replace owner's program. Takes effect at the next vertical blank if owner
  * is on top, and is remembered for when it is again if not. -1, changing
  * nothing, if any band is unacceptable or owner is not on the stack. */
