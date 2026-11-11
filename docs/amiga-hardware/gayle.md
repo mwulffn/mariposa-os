@@ -991,7 +991,7 @@ The IDE register addresses in this document have been verified against multiple 
 
 ### Address Decoding Logic
 
-From `/Users/wulff/Projects/fs-uae/gayle.cpp` lines 389-397:
+From `/Users/wulff/Projects/amiga/emulators/fs-uae-lua/fs-uae/gayle.cpp` lines 382-390:
 
 ```c
 static int get_gayle_ide_reg(uaecptr addr, struct ide_hdf **ide)
